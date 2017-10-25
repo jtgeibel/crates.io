@@ -18,7 +18,7 @@ use upload;
 use user::RequestUser;
 use util::{read_fill, read_le_u32};
 use util::{human, internal, CargoResult, ChainError, RequestUtils};
-use version::NewVersion;
+use models::NewVersion;
 use {Badge, Category, Keyword, User};
 
 use super::{EncodableCrate, NewCrate};

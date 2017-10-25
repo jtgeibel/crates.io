@@ -5,7 +5,7 @@ use conduit::{Handler, Method};
 use cargo_registry::token::ApiToken;
 use cargo_registry::krate::EncodableCrate;
 use cargo_registry::user::{Email, EncodablePrivateUser, EncodablePublicUser, NewUser, User};
-use cargo_registry::version::EncodableVersion;
+use cargo_registry::api_types::version::EncodableVersion;
 
 use diesel::prelude::*;
 

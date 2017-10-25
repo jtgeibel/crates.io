@@ -14,7 +14,9 @@ use db::RequestTransaction;
 use schema::*;
 use util::{CargoResult, RequestUtils};
 
-use super::{version_and_crate, EncodableVersion, Version};
+use super::version_and_crate;
+use api_types::version::EncodableVersion;
+use models::Version;
 
 /// Handles the `GET /versions` route.
 pub fn index(req: &mut Request) -> CargoResult<Response> {

@@ -15,10 +15,12 @@ use dependency::EncodableDependency;
 use keyword::{CrateKeyword, EncodableKeyword};
 use schema::*;
 use util::{human, CargoResult, RequestUtils};
-use version::EncodableVersion;
-use {Category, Keyword, Version};
+use api_types::version::EncodableVersion;
+use {Category, Keyword};
 
 use super::{Crate, CrateDownload, EncodableCrate, ALL_COLUMNS};
+
+use models::Version;
 
 /// Handles the `GET /summary` route.
 pub fn summary(req: &mut Request) -> CargoResult<Response> {

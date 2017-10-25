@@ -61,10 +61,12 @@ pub use self::download::VersionDownload;
 pub use self::keyword::Keyword;
 pub use self::krate::Crate;
 pub use self::user::User;
-pub use self::version::Version;
 pub use self::uploaders::{Bomb, Uploader};
 
 pub mod api;
+pub mod api_types;
+pub mod models;
+
 pub mod app;
 pub mod badge;
 pub mod boot;
@@ -88,7 +90,6 @@ pub mod upload;
 pub mod uploaders;
 pub mod user;
 pub mod util;
-pub mod version;
 pub mod email;
 
 mod local_upload;

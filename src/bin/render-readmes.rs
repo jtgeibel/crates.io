@@ -32,7 +32,8 @@ use std::thread;
 use tar::Archive;
 use url::Url;
 
-use cargo_registry::{Config, Version};
+use cargo_registry::Config;
+use cargo_registry::models::Version;
 use cargo_registry::schema::*;
 use cargo_registry::render::markdown_to_html;
 

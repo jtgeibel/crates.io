@@ -6,7 +6,7 @@ use git;
 use krate::Crate;
 use schema::*;
 use util::{human, CargoResult};
-use version::Version;
+use models::Version;
 
 #[derive(Identifiable, Associations, Debug)]
 #[belongs_to(Version)]

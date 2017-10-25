@@ -6,7 +6,7 @@ use serde_json::Value;
 use conduit::{Handler, Method};
 use self::diesel::prelude::*;
 
-use cargo_registry::version::EncodableVersion;
+use cargo_registry::api_types::version::EncodableVersion;
 use cargo_registry::schema::versions;
 
 #[derive(Deserialize)]

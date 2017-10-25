@@ -15,7 +15,9 @@ use owner::{CrateOwner, Owner, OwnerKind};
 use crate_owner_invitation::NewCrateOwnerInvitation;
 use schema::*;
 use util::{human, CargoResult};
-use {Badge, Category, Keyword, User, Version};
+use {Badge, Category, Keyword, User};
+
+use models::Version;
 
 pub mod search;
 pub mod publish;

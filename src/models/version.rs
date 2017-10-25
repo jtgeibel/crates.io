@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
 use chrono::NaiveDateTime;
-use conduit::Request;
-use conduit_router::RequestParams;
 use diesel;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -10,16 +8,12 @@ use semver;
 use serde_json;
 
 use Crate;
-use db::RequestTransaction;
 use dependency::Dependency;
 use schema::*;
 use util::{human, CargoResult};
 use license_exprs;
 
-pub mod deprecated;
-pub mod downloads;
-pub mod metadata;
-pub mod yank;
+use api_types::version::{EncodableVersion, VersionLinks};
 
 // Queryable has a custom implementation below
 #[derive(Clone, Identifiable, Associations, Debug)]
@@ -43,29 +37,6 @@ pub struct NewVersion {
     num: String,
     features: String,
     license: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct EncodableVersion {
-    pub id: i32,
-    #[serde(rename = "crate")] pub krate: String,
-    pub num: String,
-    pub dl_path: String,
-    pub readme_path: String,
-    pub updated_at: NaiveDateTime,
-    pub created_at: NaiveDateTime,
-    pub downloads: i32,
-    pub features: HashMap<String, Vec<String>>,
-    pub yanked: bool,
-    pub license: Option<String>,
-    pub links: VersionLinks,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct VersionLinks {
-    pub dependencies: String,
-    pub version_downloads: String,
-    pub authors: String,
 }
 
 impl Version {
@@ -245,25 +216,4 @@ impl Queryable<versions::SqlType, Pg> for Version {
             license: row.8,
         }
     }
-}
-
-fn version_and_crate(req: &mut Request) -> CargoResult<(Version, Crate)> {
-    let crate_name = &req.params()["crate_id"];
-    let semver = &req.params()["version"];
-    if semver::Version::parse(semver).is_err() {
-        return Err(human(&format_args!("invalid semver: {}", semver)));
-    };
-    let conn = req.db_conn()?;
-    let krate = Crate::by_name(crate_name).first::<Crate>(&*conn)?;
-    let version = Version::belonging_to(&krate)
-        .filter(versions::num.eq(semver))
-        .first(&*conn)
-        .map_err(|_| {
-            human(&format_args!(
-                "crate `{}` does not have a version `{}`",
-                crate_name,
-                semver
-            ))
-        })?;
-    Ok((version, krate))
 }

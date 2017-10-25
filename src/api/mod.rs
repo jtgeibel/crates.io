@@ -19,8 +19,9 @@ use Env;
 use local_upload;
 use {app, dist, http, log, util};
 
-use {category, crate_owner_invitation, keyword, krate, version, user, token};
+use {category, crate_owner_invitation, keyword, krate, token, user};
 mod site_metadata;
+mod version;
 
 /// Configures routes, sessions, logging, and other middleware.
 ///

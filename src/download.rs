@@ -3,7 +3,7 @@ use diesel;
 use diesel::prelude::*;
 
 use schema::version_downloads;
-use version::Version;
+use models::Version;
 
 #[derive(Queryable, Identifiable, Associations, Debug, Clone, Copy)]
 #[belongs_to(Version)]

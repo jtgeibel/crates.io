@@ -13,7 +13,7 @@ use db::RequestTransaction;
 use download::{EncodableVersionDownload, VersionDownload};
 use schema::*;
 use util::{CargoResult, RequestUtils};
-use Version;
+use models::Version;
 
 use super::{to_char, Crate};
 

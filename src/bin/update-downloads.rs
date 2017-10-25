@@ -120,7 +120,7 @@ mod test {
     use cargo_registry::env;
     use cargo_registry::krate::{Crate, NewCrate};
     use cargo_registry::user::{NewUser, User};
-    use cargo_registry::version::{NewVersion, Version};
+    use cargo_registry::models::{NewVersion, Version};
 
     fn conn() -> PgConnection {
         let conn = PgConnection::establish(&env("TEST_DATABASE_URL")).unwrap();

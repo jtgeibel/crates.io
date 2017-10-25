@@ -10,9 +10,11 @@ use pagination::Paginate;
 use schema::*;
 use user::RequestUser;
 use util::{CargoResult, RequestUtils};
-use {Badge, Version};
+use Badge;
 
 use super::{canon_crate_name, Crate, EncodableCrate, ALL_COLUMNS};
+
+use models::Version;
 
 /// Handles the `GET /crates` route.
 /// Returns a list of crates. Called in a variety of scenarios in the

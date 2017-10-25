@@ -22,7 +22,7 @@ use cargo_registry::token::ApiToken;
 use cargo_registry::schema::{crates, metadata, versions};
 
 use cargo_registry::upload as u;
-use cargo_registry::version::EncodableVersion;
+use cargo_registry::api_types::version::EncodableVersion;
 use cargo_registry::category::{Category, EncodableCategory};
 
 use {CrateList, CrateMeta, GoodCrate};
