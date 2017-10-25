@@ -159,7 +159,7 @@ fn app() -> (
     let app = App::new(&config);
     t!(t!(app.diesel_database.get()).begin_test_transaction());
     let app = Arc::new(app);
-    let middleware = cargo_registry::middleware(app.clone());
+    let middleware = cargo_registry::api::middleware(app.clone());
     return (bomb, app, middleware);
 }
 
