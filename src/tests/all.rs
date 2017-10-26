@@ -31,7 +31,7 @@ use std::sync::Arc;
 use cargo_registry::app::App;
 use cargo_registry::category::NewCategory;
 use cargo_registry::dependency::NewDependency;
-use cargo_registry::keyword::Keyword;
+use cargo_registry::models::keyword::Keyword;
 use cargo_registry::krate::{CrateDownload, EncodableCrate, NewCrate};
 use cargo_registry::schema::*;
 use cargo_registry::upload as u;

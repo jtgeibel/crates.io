@@ -19,7 +19,8 @@ use Env;
 use local_upload;
 use {app, dist, http, log, util};
 
-use {category, crate_owner_invitation, keyword, krate, token, user};
+use {category, crate_owner_invitation, krate, token, user};
+mod keyword;
 mod site_metadata;
 mod version;
 

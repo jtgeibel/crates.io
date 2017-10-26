@@ -1,7 +1,8 @@
 use conduit::{Handler, Method};
 use conduit_test::MockRequest;
 
-use cargo_registry::keyword::{EncodableKeyword, Keyword};
+use cargo_registry::api_types::keyword::EncodableKeyword;
+use cargo_registry::models::keyword::Keyword;
 
 #[derive(Deserialize)]
 struct KeywordList {

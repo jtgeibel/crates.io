@@ -15,7 +15,7 @@ use serde_json;
 use cargo_registry::dependency::EncodableDependency;
 use cargo_registry::download::EncodableVersionDownload;
 use cargo_registry::git;
-use cargo_registry::keyword::EncodableKeyword;
+use cargo_registry::api_types::keyword::EncodableKeyword;
 use cargo_registry::krate::{Crate, EncodableCrate, MAX_NAME_LENGTH};
 
 use cargo_registry::token::ApiToken;

@@ -9,7 +9,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use semver;
 use dependency::Kind as DependencyKind;
 
-use keyword::Keyword as CrateKeyword;
+use models::keyword::Keyword as CrateKeyword;
 use krate::{Crate, MAX_NAME_LENGTH};
 
 #[derive(Deserialize, Serialize, Debug)]

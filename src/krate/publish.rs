@@ -18,10 +18,11 @@ use upload;
 use user::RequestUser;
 use util::{read_fill, read_le_u32};
 use util::{human, internal, CargoResult, ChainError, RequestUtils};
-use models::NewVersion;
-use {Badge, Category, Keyword, User};
+
+use {Badge, Category, User};
 
 use super::{EncodableCrate, NewCrate};
+use models::{NewVersion, Keyword};
 
 /// Handles the `PUT /crates/new` route.
 /// Used by `cargo publish` to publish a new crate or to publish a new version of an
