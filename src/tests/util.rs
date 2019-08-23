@@ -30,15 +30,15 @@ use cargo_registry::{
     models::{ApiToken, User},
     App, Config,
 };
-use diesel::PgConnection;
 use std::{rc::Rc, sync::Arc, time::Duration};
-use swirl::Runner;
-
-use conduit::{Handler, Method, Request};
-use conduit_test::MockRequest;
 
 use cargo_registry::git::Repository as WorkerRepository;
+use conduit::{Handler, Method, Request};
+use conduit_test::MockRequest;
+use diesel::PgConnection;
 use git2::Repository as UpstreamRepository;
+use serde_json::json;
+use swirl::Runner;
 
 struct TestAppInner {
     app: Arc<App>,

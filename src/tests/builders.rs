@@ -289,7 +289,7 @@ impl<'a> CrateBuilder<'a> {
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     // The bytes of an empty tarball is not an empty vector of bytes because of tarball headers.
     // Unless files are added to a PublishBuilder, the `.crate` tarball that gets uploaded
     // will be empty, so precompute the empty tarball bytes to use as a default.

@@ -1,8 +1,8 @@
 //! This module implements functionality for interacting with GitHub.
 
+use log::info;
 use oauth2::*;
 use reqwest::{self, header};
-
 use serde::de::DeserializeOwned;
 
 use std::str;

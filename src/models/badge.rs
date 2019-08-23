@@ -1,6 +1,7 @@
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
 use diesel::prelude::*;
+use serde_json::json;
 use std::collections::HashMap;
 
 use crate::models::Crate;

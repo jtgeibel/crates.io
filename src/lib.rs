@@ -9,15 +9,9 @@
 #![recursion_limit = "256"]
 
 #[macro_use]
-extern crate derive_deref;
-#[macro_use]
 extern crate diesel;
 #[macro_use]
-extern crate log;
-#[macro_use]
 extern crate serde;
-#[macro_use]
-extern crate serde_json;
 
 pub use crate::{app::App, config::Config, uploaders::Uploader};
 use std::sync::Arc;
