@@ -1,10 +1,5 @@
 #![deny(warnings, clippy::all, rust_2018_idioms)]
 
-extern crate base64;
-extern crate chrono;
-extern crate openssl;
-extern crate reqwest;
-
 use base64::encode;
 use chrono::prelude::Utc;
 use openssl::hash::MessageDigest;
