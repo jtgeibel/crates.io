@@ -5,8 +5,6 @@
 //! [krate](krate/index.html), [user](user/index.html) and [version](version/index.html) modules.
 #![deny(warnings, clippy::all, rust_2018_idioms)]
 #![deny(missing_debug_implementations, missing_copy_implementations)]
-#![deny(bare_trait_objects)]
-#![recursion_limit = "256"]
 
 #[macro_use]
 extern crate diesel;
