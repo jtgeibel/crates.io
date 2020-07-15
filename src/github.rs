@@ -5,10 +5,25 @@ use reqwest::{self, header};
 
 use serde::de::DeserializeOwned;
 
-use std::str;
+use std::{fmt, str};
 
 use crate::app::App;
-use crate::util::errors::{cargo_err, internal, not_found, AppError, AppResult};
+use crate::util::errors::{cargo_err, internal, AppError, AppResult, NotFound};
+
+#[derive(Debug)]
+pub(crate) struct GhNotFound;
+
+impl AppError for GhNotFound {
+    fn response(&self) -> Option<conduit::Response<conduit::Body>> {
+        NotFound.response()
+    }
+}
+
+impl fmt::Display for GhNotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        "not found returned by GitHub API".fmt(f)
+    }
+}
 
 /// Does all the nonsense for sending a GET to Github. Doesn't handle parsing
 /// because custom error-code handling may be desirable. Use
@@ -46,7 +61,7 @@ fn handle_error_response(app: &App, error: &reqwest::Error) -> Box<dyn AppError>
              https://{}/login",
             app.config.domain_name,
         )),
-        Some(Status::NOT_FOUND) => not_found(),
+        Some(Status::NOT_FOUND) => Box::new(GhNotFound),
         _ => internal(&format_args!(
             "didn't get a 200 result from github: {}",
             error

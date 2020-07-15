@@ -1,8 +1,8 @@
 use diesel::prelude::*;
 
 use crate::app::App;
-use crate::github::{github_api, team_url};
-use crate::util::errors::{cargo_err, AppResult, NotFound};
+use crate::github::{github_api, team_url, GhNotFound};
+use crate::util::errors::{cargo_err, AppResult};
 
 use oauth2::AccessToken;
 
@@ -221,7 +221,7 @@ fn team_with_gh_id_contains_user(app: &App, github_id: i32, user: &User) -> AppR
     let token = AccessToken::new(user.gh_access_token.clone());
     let membership = match github_api::<Membership>(app, &url, &token) {
         // Officially how `false` is returned
-        Err(ref e) if e.is::<NotFound>() => return Ok(false),
+        Err(ref e) if e.is::<GhNotFound>() => return Ok(false),
         x => x?,
     };
 
