@@ -37,7 +37,7 @@ macro_rules! t {
     ($e:expr) => {
         match $e {
             Ok(e) => e,
-            Err(m) => panic!("{} failed with: {}", stringify!($e), m),
+            Err(m) => panic!("{} failed with: {:?}", stringify!($e), m),
         }
     };
 }

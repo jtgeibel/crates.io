@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::util::errors::{server_error, AppResult};
+use crate::util::errors::{AppResult, ErrorBuilder};
 
 use lettre::transport::file::FileTransport;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
@@ -118,12 +118,12 @@ fn send_email(recipient: &str, subject: &str, body: &str) -> AppResult<()> {
                 .build();
 
             let result = transport.send(&email);
-            result.map_err(|_| server_error("Error in sending email"))?;
+            result.map_err(|_| ErrorBuilder::server_error("Error in sending email"))?;
         }
         None => {
             let sender = FileTransport::new(Path::new("/tmp"));
             let result = sender.send(&email);
-            result.map_err(|_| server_error("Email file could not be generated"))?;
+            result.map_err(|_| ErrorBuilder::server_error("Email file could not be generated"))?;
         }
     }
 

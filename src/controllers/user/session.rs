@@ -88,7 +88,7 @@ pub fn authorize(req: &mut dyn RequestExt) -> EndpointResult {
         let session_state = req.session_mut().remove(&"github_oauth_state".to_string());
         let session_state = session_state.as_deref();
         if Some(&state[..]) != session_state {
-            return Err(bad_request("invalid state parameter"));
+            return Err(ErrorBuilder::bad_request("invalid state parameter"));
         }
     }
 
@@ -100,7 +100,7 @@ pub fn authorize(req: &mut dyn RequestExt) -> EndpointResult {
         .exchange_code(code)
         .request(http_client)
         .map_err(|e| e.compat())
-        .chain_error(|| server_error("Error obtaining token"))?;
+        .chain_user_facing_fallback(|| UserFacing::server_error("Error obtaining token"))?;
     let token = token.access_token();
 
     // Fetch the user info from GitHub using the access token we just got and create a user record
@@ -135,10 +135,10 @@ impl GithubUser {
         )
         .create_or_update(self.email.as_deref(), conn)
         .map_err(Into::into)
-        .or_else(|e: Box<dyn AppError>| {
+        .or_else(|e: Box<ErrorBuilder>| {
             // If we're in read only mode, we can't update their details
             // just look for an existing user
-            if e.is::<ReadOnlyMode>() {
+            if e.root_cause_is::<ReadOnlyMode>() {
                 users::table
                     .filter(users::gh_id.eq(self.id))
                     .first(conn)

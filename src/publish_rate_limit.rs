@@ -36,9 +36,10 @@ impl PublishRateLimit {
         if bucket.tokens >= 1 {
             Ok(())
         } else {
-            Err(Box::new(TooManyRequests {
+            Err(TooManyRequests {
                 retry_after: bucket.last_refill + chrono::Duration::from_std(self.rate).unwrap(),
-            }))
+            }
+            .root_cause())
         }
     }
 

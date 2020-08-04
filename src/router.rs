@@ -4,7 +4,7 @@ use conduit::{Handler, HandlerResult, RequestExt};
 use conduit_router::{RequestParams, RouteBuilder};
 
 use crate::controllers::*;
-use crate::util::errors::{std_error, AppError, NotFound};
+use crate::util::errors::{BuiltResponse, NotFound};
 use crate::util::EndpointResult;
 use crate::{App, Env};
 
@@ -143,15 +143,16 @@ impl Handler for C {
         let C(f) = *self;
         match f(req) {
             Ok(resp) => Ok(resp),
-            Err(e) => {
-                if let Some(cause) = e.cause() {
-                    req.log_metadata("cause", cause.to_string())
-                };
-                match e.response() {
-                    Some(response) => Ok(response),
-                    None => Err(std_error(e)),
+            Err(e) => match e.build() {
+                BuiltResponse::Response { response, cause } => {
+                    if let Some(cause) = cause {
+                        req.log_metadata("cause", cause);
+                    };
+                    Ok(response)
                 }
-            }
+                // The LogRequest middleware will log this as `error="..."` using Display
+                BuiltResponse::Error(e) => Err(e),
+            },
         }
     }
 }
@@ -178,7 +179,7 @@ impl Handler for R404 {
                 req.mut_extensions().insert(m.params.clone());
                 m.handler.call(req)
             }
-            Err(..) => Ok(NotFound.into()),
+            Err(..) => Ok(NotFound.response()),
         }
     }
 }
@@ -186,17 +187,15 @@ impl Handler for R404 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::errors::{
-        bad_request, cargo_err, forbidden, internal, not_found, AppError, ChainError,
-    };
+    use crate::util::errors::{ChainError, ErrorBuilder, Forbidden, UserFacing};
     use crate::util::EndpointResult;
 
     use conduit::StatusCode;
     use conduit_test::MockRequest;
     use diesel::result::Error as DieselError;
 
-    fn err<E: AppError>(err: E) -> EndpointResult {
-        Err(Box::new(err))
+    fn err<E: std::error::Error + 'static>(err: E) -> EndpointResult {
+        Err(err.into())
     }
 
     #[test]
@@ -205,11 +204,17 @@ mod tests {
 
         // Types for handling common error status codes
         assert_eq!(
-            C(|_| Err(bad_request(""))).call(&mut req).unwrap().status(),
+            C(|_| Err(ErrorBuilder::bad_request("")))
+                .call(&mut req)
+                .unwrap()
+                .status(),
             StatusCode::BAD_REQUEST
         );
         assert_eq!(
-            C(|_| Err(forbidden())).call(&mut req).unwrap().status(),
+            C(|_| Err(Forbidden.root_cause()))
+                .call(&mut req)
+                .unwrap()
+                .status(),
             StatusCode::FORBIDDEN
         );
         assert_eq!(
@@ -220,13 +225,19 @@ mod tests {
             StatusCode::NOT_FOUND
         );
         assert_eq!(
-            C(|_| Err(not_found())).call(&mut req).unwrap().status(),
+            C(|_| Err(NotFound.root_cause()))
+                .call(&mut req)
+                .unwrap()
+                .status(),
             StatusCode::NOT_FOUND
         );
 
         // cargo_err errors are returned as 200 so that cargo displays this nicely on the command line
         assert_eq!(
-            C(|_| Err(cargo_err(""))).call(&mut req).unwrap().status(),
+            C(|_| Err(ErrorBuilder::cargo_err_legacy("")))
+                .call(&mut req)
+                .unwrap()
+                .status(),
             StatusCode::OK
         );
 
@@ -234,8 +245,8 @@ mod tests {
         let response = C(|_| {
             Err("-1"
                 .parse::<u8>()
-                .chain_error(|| internal("middle error"))
-                .chain_error(|| bad_request("outer user facing error"))
+                .chain_internal_err_cause("middle error")
+                .chain_user_facing_fallback(|| UserFacing::bad_request("outer user facing error"))
                 .unwrap_err())
         })
         .call(&mut req)
@@ -247,7 +258,9 @@ mod tests {
         );
 
         // All other error types are propogated up the middleware, eventually becoming status 500
-        assert!(C(|_| Err(internal(""))).call(&mut req).is_err());
+        assert!(C(|_| Err(ErrorBuilder::internal("".into())))
+            .call(&mut req)
+            .is_err());
         assert!(
             C(|_| err::<::serde_json::Error>(::serde::de::Error::custom("ExpectedColon")))
                 .call(&mut req)

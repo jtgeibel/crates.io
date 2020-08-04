@@ -16,7 +16,7 @@ mod request_proxy;
 pub mod rfc3339;
 
 pub type AppResponse = Response<conduit::Body>;
-pub type EndpointResult = Result<AppResponse, Box<dyn errors::AppError>>;
+pub type EndpointResult = Result<AppResponse, Box<errors::ErrorBuilder>>;
 
 /// Serialize a value to JSON and build a status 200 Response
 ///

@@ -5,19 +5,15 @@ use reqwest::{self, header};
 
 use serde::de::DeserializeOwned;
 
-use std::{fmt, str};
+use std::{error::Error, fmt, str};
 
 use crate::app::App;
-use crate::util::errors::{cargo_err, internal, AppError, AppResult, NotFound};
+use crate::util::errors::{AppResult, ChainError, ErrorBuilder, NotFound};
 
 #[derive(Debug)]
 pub(crate) struct GhNotFound;
 
-impl AppError for GhNotFound {
-    fn response(&self) -> Option<conduit::Response<conduit::Body>> {
-        NotFound.response()
-    }
-}
+impl Error for GhNotFound {}
 
 impl fmt::Display for GhNotFound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -47,25 +43,28 @@ where
         .map_err(Into::into)
 }
 
-fn handle_error_response(app: &App, error: &reqwest::Error) -> Box<dyn AppError> {
+fn handle_error_response(app: &App, error: &reqwest::Error) -> Box<ErrorBuilder> {
     use reqwest::StatusCode as Status;
 
     match error.status() {
-        Some(Status::UNAUTHORIZED) | Some(Status::FORBIDDEN) => cargo_err(&format!(
-            "It looks like you don't have permission \
-             to query a necessary property from Github \
-             to complete this request. \
-             You may need to re-authenticate on \
-             crates.io to grant permission to read \
-             github org memberships. Just go to \
-             https://{}/login",
-            app.config.domain_name,
-        )),
-        Some(Status::NOT_FOUND) => Box::new(GhNotFound),
-        _ => internal(&format_args!(
-            "didn't get a 200 result from github: {}",
-            error
-        )),
+        Some(Status::UNAUTHORIZED) | Some(Status::FORBIDDEN) => {
+            ErrorBuilder::custom_cargo_err_legacy(format!(
+                "It looks like you don't have permission \
+                 to query a necessary property from Github \
+                 to complete this request. \
+                 You may need to re-authenticate on \
+                 crates.io to grant permission to read \
+                 github org memberships. Just go to \
+                 https://{}/login",
+                app.config.domain_name,
+            ))
+        }
+        Some(Status::NOT_FOUND) => Err::<(), _>(GhNotFound)
+            .chain_user_facing_fallback(|| NotFound.response())
+            .unwrap_err(), // This shouldn't panic, the value is known to be an Err(_)
+        _ => {
+            ErrorBuilder::internal(format!("didn't get a 200 result from github: {}", error).into())
+        }
     }
 }
 

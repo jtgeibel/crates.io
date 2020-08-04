@@ -34,7 +34,9 @@ fn modify_yank(req: &mut dyn RequestExt, yanked: bool) -> EndpointResult {
     let owners = krate.owners(&conn)?;
 
     if user.rights(req.app(), &owners)? < Rights::Publish {
-        return Err(cargo_err("must already be an owner to yank or unyank"));
+        return Err(ErrorBuilder::cargo_err_legacy(
+            "must already be an owner to yank or unyank",
+        ));
     }
     let action = if yanked {
         VersionAction::Yank

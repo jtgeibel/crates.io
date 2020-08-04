@@ -50,7 +50,7 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
 
     let verified_email_address = user.verified_email(&conn)?;
     let verified_email_address = verified_email_address.ok_or_else(|| {
-        cargo_err(&format!(
+        ErrorBuilder::custom_cargo_err_legacy(format!(
             "A verified email address is required to publish crates to crates.io. \
              Visit https://{}/me to set and verify your email address.",
             app.config.domain_name,
@@ -97,7 +97,7 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
 
         let owners = krate.owners(&conn)?;
         if user.rights(req.app(), &owners)? < Rights::Publish {
-            return Err(cargo_err(
+            return Err(ErrorBuilder::cargo_err_legacy(
                 "this crate exists but you don't seem to be an owner. \
                  If you believe this is a mistake, perhaps you need \
                  to accept an invitation to be an owner before \
@@ -106,7 +106,7 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
         }
 
         if krate.name != *name {
-            return Err(cargo_err(&format_args!(
+            return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
                 "crate was previously named `{}`",
                 krate.name
             )));
@@ -118,9 +118,9 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
         // this file length.
         let file_length = read_le_u32(req.body())?;
 
-        let content_length = req
-            .content_length()
-            .chain_error(|| cargo_err("missing header: Content-Length"))?;
+        let content_length = req.content_length().chain_user_facing_fallback(|| {
+            UserFacing::cargo_err_legacy("missing header: Content-Length")
+        })?;
 
         let maximums = Maximums::new(
             krate.max_upload_size,
@@ -129,7 +129,7 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
         );
 
         if content_length > maximums.max_upload_size {
-            return Err(cargo_err(&format_args!(
+            return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
                 "max upload size is: {}",
                 maximums.max_upload_size
             )));
@@ -233,13 +233,18 @@ fn parse_new_headers(req: &mut dyn RequestExt) -> AppResult<EncodableCrateUpload
 
     let max = req.app().config.max_upload_size;
     if metadata_length > max {
-        return Err(cargo_err(&format_args!("max upload size is: {}", max)));
+        return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
+            "max upload size is: {}",
+            max
+        )));
     }
     let mut json = vec![0; metadata_length as usize];
     read_fill(req.body(), &mut json)?;
-    let json = String::from_utf8(json).map_err(|_| cargo_err("json body was not valid utf-8"))?;
-    let new: EncodableCrateUpload = serde_json::from_str(&json)
-        .map_err(|e| cargo_err(&format_args!("invalid upload request: {}", e)))?;
+    let json = String::from_utf8(json)
+        .map_err(|_| ErrorBuilder::cargo_err_legacy("json body was not valid utf-8"))?;
+    let new: EncodableCrateUpload = serde_json::from_str(&json).map_err(|e| {
+        ErrorBuilder::custom_cargo_err_legacy(format!("invalid upload request: {}", e))
+    })?;
 
     // Make sure required fields are provided
     fn empty(s: Option<&String>) -> bool {
@@ -259,7 +264,7 @@ fn parse_new_headers(req: &mut dyn RequestExt) -> AppResult<EncodableCrateUpload
         missing.push("authors");
     }
     if !missing.is_empty() {
-        return Err(cargo_err(&format_args!(
+        return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
             "missing or empty metadata fields: {}. Please \
              see https://doc.rust-lang.org/cargo/reference/manifest.html for \
              how to upload metadata",

@@ -12,7 +12,7 @@
 //!   typically not converted to user facing errors and most usage is within the models,
 //!   controllers, and middleware layers.
 
-use std::any::{Any, TypeId};
+use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
 
@@ -23,293 +23,401 @@ use crate::util::AppResponse;
 pub(super) mod concrete;
 mod json;
 
-pub(crate) use json::{InsecurelyGeneratedTokenRevoked, NotFound, ReadOnlyMode, TooManyRequests};
+pub(crate) use json::{
+    Forbidden, InsecurelyGeneratedTokenRevoked, NotFound, ReadOnlyMode, TooManyRequests,
+};
 
-/// Returns an error with status 200 and the provided description as JSON
+pub type AppResult<T> = Result<T, Box<ErrorBuilder>>;
+
+/// A struct with helper methods for common error responses.
+pub(crate) struct UserFacing;
+
+impl UserFacing {
+    /// Returns an error with status 400 and the provided description as JSON.
+    pub(crate) fn bad_request(user_message: &'static str) -> AppResponse {
+        json::BadRequest(user_message.into()).response()
+    }
+
+    /// Return a custom error with status 400 and the provided description as JSON.
+    ///
+    /// Care should be taken not to include sensitive information when generating
+    /// custom user facing messages.
+    fn custom_bad_request(user_message: String) -> AppResponse {
+        json::BadRequest(user_message.into()).response()
+    }
+
+    /// Returns an error with status 500 and the provided description as JSON.
+    pub(crate) fn server_error(user_message: &'static str) -> AppResponse {
+        json::ServerError(user_message).response()
+    }
+
+    /// Returns an error with status 200 and the provided user message as JSON.
+    ///
+    /// Newer versions of cargo support other status codes so usage of these helpers
+    /// should be removed over time.
+    pub(crate) fn cargo_err_legacy(user_message: &'static str) -> AppResponse {
+        json::CargoLegacy(user_message.into()).response()
+    }
+
+    /// Returns an error with status 200 and the provided user message as JSON.
+    ///
+    /// Newer versions of cargo support other status codes so usage of these helpers
+    /// should be removed over time.
+    ///
+    /// Care should be taken not to include sensitive information when generating
+    /// custom user facing messages.
+    fn custom_cargo_err_legacy(user_message: String) -> AppResponse {
+        json::CargoLegacy(user_message.into()).response()
+    }
+}
+
+/// A builder that maintains a chain of internal errors and a user-facing response.
+pub struct ErrorBuilder {
+    /// The cause chain, intended for logging and not the user.
+    /// The first element, if present, is the root cause.
+    chain: Vec<ChainElement>,
+    /// An error response prepared for the user.
+    user_facing_response: Option<AppResponse>,
+}
+
+impl fmt::Debug for ErrorBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ErrorBuilder")
+            .field("chain", &self.chain)
+            .field(
+                "user_facing_response",
+                if self.user_facing_response.is_none() {
+                    &"None"
+                } else {
+                    &"Some(_)"
+                },
+            )
+            .finish()
+    }
+}
+
+impl<E: Error + 'static> From<E> for Box<ErrorBuilder> {
+    fn from(err: E) -> Self {
+        convert_special_errors(err)
+    }
+}
+
+impl ErrorBuilder {
+    /// Create a builder for an error with status 400 and the provided description as JSON.
+    pub(crate) fn bad_request(user_message: &'static str) -> Box<Self> {
+        Box::new(ErrorBuilder {
+            chain: vec![],
+            user_facing_response: Some(UserFacing::bad_request(user_message)),
+        })
+    }
+
+    /// Create a builder for an error with status 400 and the provided description as JSON.
+    ///
+    /// Care should be taken not to include sensitive information when generating
+    /// custom user facing messages.
+    pub(crate) fn custom_bad_request(user_message: String) -> Box<Self> {
+        Box::new(ErrorBuilder {
+            chain: vec![],
+            user_facing_response: Some(UserFacing::custom_bad_request(user_message)),
+        })
+    }
+
+    /// Create a builder for an error with status 500 and the provided description as JSON.
+    pub(crate) fn server_error(user_message: &'static str) -> Box<Self> {
+        Box::new(ErrorBuilder {
+            chain: vec![],
+            user_facing_response: Some(json::ServerError(user_message).response()),
+        })
+    }
+
+    /// Create a builder with a root internal error and no initial user facing response.
+    pub(crate) fn internal(info: Cow<'static, str>) -> Box<Self> {
+        Box::new(Self {
+            chain: vec![ChainElement::Internal(info)],
+            user_facing_response: None,
+        })
+    }
+
+    /// Create a builder for an error with status 200 and the provided user message as JSON.
+    ///
+    /// Newer versions of cargo support other status codes so usage of these helpers
+    /// should be removed over time.
+    pub(crate) fn cargo_err_legacy(user_message: &'static str) -> Box<Self> {
+        Box::new(ErrorBuilder {
+            chain: vec![],
+            user_facing_response: Some(UserFacing::cargo_err_legacy(user_message)),
+        })
+    }
+
+    /// Create a builder for an error with status 200 and the provided user message as JSON.
+    ///
+    /// Newer versions of cargo support other status codes so usage of these helpers
+    /// should be removed over time.
+    ///
+    /// Care should be taken not to include sensitive information when generating
+    /// custom user facing messages.
+    pub(crate) fn custom_cargo_err_legacy(user_message: String) -> Box<Self> {
+        Box::new(ErrorBuilder {
+            chain: vec![],
+            user_facing_response: Some(UserFacing::custom_cargo_err_legacy(user_message)),
+        })
+    }
+
+    /// Test the error type of the root cause, if there is one.
+    pub(crate) fn root_cause_is<T: Error + 'static>(&self) -> bool {
+        self.chain
+            .first()
+            .map(|root| matches!(root, ChainElement::Error(e) if e.is::<T>()))
+            .unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn into_response(self) -> Option<AppResponse> {
+        self.user_facing_response
+    }
+
+    /// Generate a summary of the cause chain, appropriate for logging.
+    fn cause_chain(&self) -> String {
+        self.chain
+            .iter()
+            .rev()
+            .map(|element| match element {
+                ChainElement::Internal(info) => info.clone(),
+                ChainElement::Error(e) => Cow::Owned(e.to_string()),
+            })
+            .collect::<Vec<_>>()
+            .join(" caused by ")
+    }
+
+    /// Finalize the error response built by the endpoint.
+    pub(crate) fn build(self) -> BuiltResponse {
+        if self.user_facing_response.is_some() {
+            let cause = if self.chain.is_empty() {
+                None
+            } else {
+                Some(self.cause_chain())
+            };
+            return BuiltResponse::Response {
+                // The unwrap is fine because user_facing_response is Some(_)
+                response: self.user_facing_response.unwrap(),
+                cause,
+            };
+        } else if let Some(ChainElement::Error(root_cause)) = self.chain.first() {
+            // Convert database NotFound into a user-facing response
+            if let Some(diesel::result::Error::NotFound) = root_cause.downcast_ref() {
+                return BuiltResponse::Response {
+                    response: NotFound.response(),
+                    cause: None,
+                };
+            }
+        }
+
+        BuiltResponse::Error(Box::new(InternalAppError(self.cause_chain())))
+    }
+}
+
+/// A type representing the elements of the cause chain.
+#[derive(Debug)]
+enum ChainElement {
+    /// An internal error message.
+    Internal(Cow<'static, str>),
+    /// An error, most useful as the root cause (the first item) in the chain.
+    Error(Box<dyn Error + 'static>),
+}
+
+/// A representation of the final error output of an endpoint.
+pub(crate) enum BuiltResponse {
+    /// A user-facing response with an optional cause for logging.
+    Response {
+        response: AppResponse,
+        cause: Option<String>,
+    },
+    /// An error to propogate up the middleware stack when no user-facing response is available.
+    /// The middleware stack will convert this to a generic Internal Server Error after logging
+    /// this as `error="..."` using Display.
+    Error(Box<dyn Error + Send>),
+}
+
+/// A trait providing helper methods for working with an `ErrorBuilder`.
+pub(crate) trait ChainError<T> {
+    /// Capture a user facing error response.
+    ///
+    /// The fallback is only applied if a user response has not yet been set. In general, an
+    /// error prepared further down the call stack (and vetted as appropriate for providing to
+    /// the user) should not be overwritten by a more generic error higher up the call stack.
+    fn chain_user_facing_fallback(self, callback: fn() -> AppResponse) -> AppResult<T>;
+
+    /// Capture an internal message for the cause chain that is logged
+    ///
+    /// The cause chain produces a string like "... caused by ..." with the innermost
+    /// error appearing last.
+    fn chain_internal_err_cause(self, cause: &'static str) -> AppResult<T>;
+}
+
+/// Convert some errors into user-facing responses when converted to a builder.
 ///
-/// This is for backwards compatibility with cargo endpoints.  For all other
-/// endpoints, use helpers like `bad_request` or `server_error` which set a
-/// correct status code.
-pub fn cargo_err<S: ToString + ?Sized>(error: &S) -> Box<dyn AppError> {
-    Box::new(json::Ok(error.to_string()))
+/// There are several places where a generic error is converted into an `ErrorBuilder`:
+///
+/// * A From<E> impl for `E: Error + 'static`, producing a Box<ErrorBuilder>.
+/// * The `ChainError` methods for `Result<T, E>`.
+fn convert_special_errors<E: Error + 'static>(cause: E) -> Box<ErrorBuilder> {
+    match (&cause as &dyn Error).downcast_ref() {
+        Some(DieselError::DatabaseError(_, info))
+            if info.message().ends_with("read-only transaction") =>
+        {
+            ReadOnlyMode.root_cause()
+        }
+        // Cannot use the From impl here, because that would be recursive
+        _ => Box::new(ErrorBuilder {
+            chain: vec![ChainElement::Error(Box::new(cause))],
+            user_facing_response: None,
+        }),
+    }
 }
 
-// The following are intended to be used for errors being sent back to the Ember
-// frontend, not to cargo as cargo does not handle non-200 response codes well
-// (see <https://github.com/rust-lang/cargo/issues/3995>), but Ember requires
-// non-200 response codes for its stores to work properly.
-
-/// Return an error with status 400 and the provided description as JSON
-pub fn bad_request<S: ToString + ?Sized>(error: &S) -> Box<dyn AppError> {
-    Box::new(json::BadRequest(error.to_string()))
-}
-
-pub fn forbidden() -> Box<dyn AppError> {
-    Box::new(json::Forbidden)
-}
-
-pub fn not_found() -> Box<dyn AppError> {
-    Box::new(json::NotFound)
-}
-
-/// Returns an error with status 500 and the provided description as JSON
-pub fn server_error<S: ToString + ?Sized>(error: &S) -> Box<dyn AppError> {
-    Box::new(json::ServerError(error.to_string()))
-}
-
-// =============================================================================
-// AppError trait
-
-pub trait AppError: Send + fmt::Display + fmt::Debug + 'static {
-    /// Generate an HTTP response for the error
-    ///
-    /// If none is returned, the error will bubble up the middleware stack
-    /// where it is eventually logged and turned into a status 500 response.
-    fn response(&self) -> Option<AppResponse>;
-
-    /// The cause of an error response
-    ///
-    /// If present, an error provided to the `LogRequests` middleware.
-    ///
-    /// This is intended for use with the `ChainError` trait, where a user facing
-    /// error may wrap an internal error we still want to log.
-    fn cause(&self) -> Option<&dyn AppError> {
-        None
+impl<T, E: Error + 'static> ChainError<T> for Result<T, E> {
+    /// If the Result is an error, apply any special conversions then chain with the message.
+    fn chain_internal_err_cause(self, internal_message: &'static str) -> AppResult<T> {
+        self.or_else(|cause| {
+            Err(convert_special_errors(cause)).chain_internal_err_cause(internal_message)
+        })
     }
 
-    fn get_type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-
-    fn chain<E>(self, error: E) -> Box<dyn AppError>
-    where
-        Self: Sized,
-        E: AppError,
-    {
-        Box::new(ChainedError {
-            error,
-            cause: Box::new(self),
+    /// If the result is an error, apply any special conversiona and add the user facing error.
+    fn chain_user_facing_fallback(self, callback: fn() -> AppResponse) -> AppResult<T> {
+        self.or_else(|cause| {
+            Err(convert_special_errors(cause)).chain_user_facing_fallback(callback)
         })
     }
 }
 
-impl dyn AppError {
-    pub fn is<T: Any>(&self) -> bool {
-        self.get_type_id() == TypeId::of::<T>()
+impl<T> ChainError<T> for AppResult<T> {
+    /// Add an message to the cause chain.
+    fn chain_internal_err_cause(self, internal_message: &'static str) -> Self {
+        self.map_err(|mut builder| {
+            builder
+                .chain
+                .push(ChainElement::Internal(internal_message.into()));
+            builder
+        })
     }
 
-    fn try_convert(err: &(dyn Error + Send + 'static)) -> Option<Box<Self>> {
-        match err.downcast_ref() {
-            Some(DieselError::NotFound) => Some(not_found()),
-            Some(DieselError::DatabaseError(_, info))
-                if info.message().ends_with("read-only transaction") =>
-            {
-                Some(Box::new(ReadOnlyMode))
-            }
-            _ => None,
-        }
-    }
-}
-
-impl AppError for Box<dyn AppError> {
-    fn response(&self) -> Option<AppResponse> {
-        (**self).response()
-    }
-
-    fn cause(&self) -> Option<&dyn AppError> {
-        (**self).cause()
-    }
-
-    fn get_type_id(&self) -> TypeId {
-        (**self).get_type_id()
-    }
-}
-
-pub type AppResult<T> = Result<T, Box<dyn AppError>>;
-
-// =============================================================================
-// Chaining errors
-
-pub trait ChainError<T> {
-    fn chain_error<E, F>(self, callback: F) -> AppResult<T>
-    where
-        E: AppError,
-        F: FnOnce() -> E;
-}
-
-#[derive(Debug)]
-struct ChainedError<E> {
-    error: E,
-    cause: Box<dyn AppError>,
-}
-
-impl<T, E: AppError> ChainError<T> for Result<T, E> {
-    fn chain_error<E2, C>(self, callback: C) -> AppResult<T>
-    where
-        E2: AppError,
-        C: FnOnce() -> E2,
-    {
-        self.map_err(move |err| err.chain(callback()))
+    /// Add a user-facing response if one has not yet been set on the builder.
+    ///
+    /// The callback is only called if a user response has not yet been provided.
+    fn chain_user_facing_fallback(self, callback: fn() -> AppResponse) -> AppResult<T> {
+        self.map_err(|mut builder| {
+            if builder.user_facing_response.is_none() {
+                builder.user_facing_response = Some(callback())
+            };
+            builder
+        })
     }
 }
 
 impl<T> ChainError<T> for Option<T> {
-    fn chain_error<E, C>(self, callback: C) -> AppResult<T>
-    where
-        E: AppError,
-        C: FnOnce() -> E,
-    {
-        match self {
-            Some(t) => Ok(t),
-            None => Err(Box::new(callback())),
-        }
+    /// If the value is None, convert it to an error with the provided message.
+    fn chain_internal_err_cause(self, internal_message: &'static str) -> AppResult<T> {
+        self.ok_or_else(|| {
+            Box::new(ErrorBuilder {
+                chain: vec![ChainElement::Internal(internal_message.into())],
+                user_facing_response: None,
+            })
+        })
+    }
+
+    /// If the value is None, the callback is invoked to generate a user facing error response.
+    fn chain_user_facing_fallback(self, callback: fn() -> AppResponse) -> AppResult<T> {
+        self.ok_or_else(|| {
+            Box::new(ErrorBuilder {
+                chain: vec![],
+                user_facing_response: Some(callback()),
+            })
+        })
     }
 }
 
-impl<E: AppError> AppError for ChainedError<E> {
-    fn response(&self) -> Option<AppResponse> {
-        self.error.response()
-    }
-
-    fn cause(&self) -> Option<&dyn AppError> {
-        Some(&*self.cause)
-    }
-}
-
-impl<E: AppError> fmt::Display for ChainedError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} caused by {}", self.error, self.cause)
-    }
-}
-
-// =============================================================================
-// Error impls
-
-impl<E: Error + Send + 'static> AppError for E {
-    fn response(&self) -> Option<AppResponse> {
-        None
-    }
-}
-
-impl<E: Error + Send + 'static> From<E> for Box<dyn AppError> {
-    fn from(err: E) -> Box<dyn AppError> {
-        AppError::try_convert(&err).unwrap_or_else(|| Box::new(err))
-    }
-}
-// =============================================================================
-// Internal error for use with `chain_error`
-
+/// Internal error to provide to the middlewhere when there is no user-facing response.
 #[derive(Debug)]
-struct InternalAppError {
-    description: String,
-}
+struct InternalAppError(String);
+
+impl Error for InternalAppError {}
 
 impl fmt::Display for InternalAppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.description)?;
+        write!(f, "{}", self.0)?;
         Ok(())
     }
-}
-
-impl AppError for InternalAppError {
-    fn response(&self) -> Option<AppResponse> {
-        None
-    }
-}
-
-#[derive(Debug)]
-struct InternalAppErrorStatic {
-    description: &'static str,
-}
-
-impl fmt::Display for InternalAppErrorStatic {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.description)?;
-        Ok(())
-    }
-}
-
-impl AppError for InternalAppErrorStatic {
-    fn response(&self) -> Option<AppResponse> {
-        None
-    }
-}
-
-pub fn internal<S: ToString + ?Sized>(error: &S) -> Box<dyn AppError> {
-    Box::new(InternalAppError {
-        description: error.to_string(),
-    })
-}
-
-#[derive(Debug)]
-struct AppErrToStdErr(pub Box<dyn AppError>);
-
-impl Error for AppErrToStdErr {}
-
-impl fmt::Display for AppErrToStdErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-pub(crate) fn std_error(e: Box<dyn AppError>) -> Box<dyn Error + Send> {
-    Box::new(AppErrToStdErr(e))
 }
 
 #[test]
 fn chain_error_internal() {
     assert_eq!(
         None::<()>
-            .chain_error(|| internal("inner"))
-            .chain_error(|| internal("middle"))
-            .chain_error(|| internal("outer"))
+            .chain_internal_err_cause("inner")
+            .chain_internal_err_cause("middle")
+            .chain_internal_err_cause("outer")
             .unwrap_err()
-            .to_string(),
+            .cause_chain(),
         "outer caused by middle caused by inner"
     );
     assert_eq!(
-        Err::<(), _>(internal("inner"))
-            .chain_error(|| internal("outer"))
+        Err::<(), _>(ErrorBuilder::internal("inner".into()))
+            .chain_internal_err_cause("outer")
             .unwrap_err()
-            .to_string(),
-        "outer caused by inner"
-    );
-
-    // Don't do this, the user will see a generic 500 error instead of the intended message
-    assert_eq!(
-        Err::<(), _>(cargo_err("inner"))
-            .chain_error(|| internal("outer"))
-            .unwrap_err()
-            .to_string(),
+            .cause_chain(),
         "outer caused by inner"
     );
     assert_eq!(
-        Err::<(), _>(forbidden())
-            .chain_error(|| internal("outer"))
+        Err::<(), _>(ErrorBuilder::cargo_err_legacy("inner"))
+            .chain_internal_err_cause("outer")
             .unwrap_err()
-            .to_string(),
-        "outer caused by must be logged in to perform that action"
+            .cause_chain(),
+        "outer"
+    );
+    assert_eq!(
+        Err::<(), _>(Forbidden.root_cause())
+            .chain_internal_err_cause("outer")
+            .unwrap_err()
+            .cause_chain(),
+        "outer caused by Forbidden"
     );
 }
 
 #[test]
 fn chain_error_user_facing() {
-    // Do this rarely, the user will only see the outer error
-    assert_eq!(
-        Err::<(), _>(cargo_err("inner"))
-            .chain_error(|| cargo_err("outer"))
-            .unwrap_err()
-            .to_string(),
-        "outer caused by inner" // never logged
-    );
+    let response = Err::<(), _>(ErrorBuilder::cargo_err_legacy("inner"))
+        .chain_user_facing_fallback(|| UserFacing::cargo_err_legacy("outer"))
+        .unwrap_err()
+        .build();
 
-    // The outer error is sent as a response to the client.
-    // The inner error never bubbles up to the logging middleware
-    assert_eq!(
-        Err::<(), _>(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
-            .chain_error(|| cargo_err("outer"))
-            .unwrap_err()
-            .to_string(),
-        "outer caused by permission denied" // never logged
-    );
+    match response {
+        BuiltResponse::Response {
+            response,
+            cause: None,
+        } => match response.into_body() {
+            // The user sees the inner user-facing error response
+            conduit::Body::Owned(bytes) => assert_eq!(bytes, br#"{"errors":[{"detail":"inner"}]}"#),
+            _ => panic!("Unexpected response Body type"),
+        },
+        _ => panic!("Unexpected BuildResponse type"),
+    }
+
+    let response = Err::<(), _>(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        .chain_user_facing_fallback(|| UserFacing::cargo_err_legacy("outer"))
+        .unwrap_err()
+        .build();
+
+    match response {
+        BuiltResponse::Response {
+            response,
+            cause: Some(cause),
+        } if cause == "permission denied" => match response.into_body() {
+            // ^ The inner error is available for logging
+            // The outer error is sent as a response to the client.
+            conduit::Body::Owned(bytes) => assert_eq!(bytes, br#"{"errors":[{"detail":"outer"}]}"#),
+            _ => panic!("Unexpected response body"),
+        },
+        _ => panic!("Unexpected response type"),
+    }
 }

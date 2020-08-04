@@ -1,5 +1,8 @@
 use crate::models::helpers::with_count::*;
-use crate::util::errors::{bad_request, AppResult};
+use crate::util::errors::{AppResult, ErrorBuilder};
+
+use std::num::ParseIntError;
+
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
@@ -16,9 +19,11 @@ pub(crate) enum Page {
 impl Page {
     fn new(params: &IndexMap<String, String>) -> AppResult<Self> {
         if let Some(s) = params.get("page") {
-            let numeric_page = s.parse().map_err(|e| bad_request(&e))?;
+            let numeric_page = s
+                .parse()
+                .map_err(|e: ParseIntError| ErrorBuilder::custom_bad_request(e.to_string()))?;
             if numeric_page < 1 {
-                return Err(bad_request(&format_args!(
+                return Err(ErrorBuilder::custom_bad_request(format!(
                     "page indexing starts from 1, page {} is invalid",
                     numeric_page,
                 )));
@@ -44,11 +49,14 @@ impl PaginationOptions {
 
         let per_page = params
             .get("per_page")
-            .map(|s| s.parse().map_err(|e| bad_request(&e)))
+            .map(|s| {
+                s.parse()
+                    .map_err(|e: ParseIntError| ErrorBuilder::custom_bad_request(e.to_string()))
+            })
             .unwrap_or(Ok(DEFAULT_PER_PAGE))?;
 
         if per_page > MAX_PER_PAGE {
-            return Err(bad_request(&format_args!(
+            return Err(ErrorBuilder::custom_bad_request(format!(
                 "cannot request more than {} items",
                 MAX_PER_PAGE,
             )));
@@ -194,7 +202,7 @@ mod tests {
     fn page_must_be_a_number() {
         let mut params = IndexMap::new();
         params.insert(String::from("page"), String::from("not a number"));
-        let page_error = Page::new(&params).unwrap_err().response().unwrap();
+        let page_error = Page::new(&params).unwrap_err().into_response().unwrap();
 
         assert_eq!(page_error.status(), StatusCode::BAD_REQUEST);
     }
@@ -205,7 +213,7 @@ mod tests {
         params.insert(String::from("per_page"), String::from("not a number"));
         let per_page_error = PaginationOptions::new(&params)
             .unwrap_err()
-            .response()
+            .into_response()
             .unwrap();
 
         assert_eq!(per_page_error.status(), StatusCode::BAD_REQUEST);

@@ -116,7 +116,9 @@ pub fn update_user(req: &mut dyn RequestExt) -> EndpointResult {
 
     // need to check if current user matches user to be updated
     if &user.id.to_string() != param_user_id {
-        return Err(bad_request("current user does not match requested user"));
+        return Err(ErrorBuilder::bad_request(
+            "current user does not match requested user",
+        ));
     }
 
     #[derive(Deserialize)]
@@ -129,19 +131,19 @@ pub fn update_user(req: &mut dyn RequestExt) -> EndpointResult {
         email: Option<String>,
     }
 
-    let user_update: UserUpdate =
-        serde_json::from_str(&body).map_err(|_| bad_request("invalid json request"))?;
+    let user_update: UserUpdate = serde_json::from_str(&body)
+        .map_err(|_| ErrorBuilder::bad_request("invalid json request"))?;
 
     let user_email = match &user_update.user.email {
         Some(email) => email.trim(),
-        None => return Err(bad_request("empty email rejected")),
+        None => return Err(ErrorBuilder::bad_request("empty email rejected")),
     };
 
     if user_email == "" {
-        return Err(bad_request("empty email rejected"));
+        return Err(ErrorBuilder::bad_request("empty email rejected"));
     }
 
-    conn.transaction::<_, Box<dyn AppError>, _>(|| {
+    conn.transaction::<_, Box<ErrorBuilder>, _>(|| {
         let new_email = NewEmail {
             user_id: user.id,
             email: user_email,
@@ -154,7 +156,7 @@ pub fn update_user(req: &mut dyn RequestExt) -> EndpointResult {
             .set(&new_email)
             .returning(emails::token)
             .get_result::<String>(&*conn)
-            .map_err(|_| server_error("Error in creating token"))?;
+            .map_err(|_| ErrorBuilder::server_error("Error in creating token"))?;
 
         crate::email::send_user_confirm_email(user_email, &user.gh_login, &token);
 
@@ -176,7 +178,9 @@ pub fn confirm_user_email(req: &mut dyn RequestExt) -> EndpointResult {
         .execute(&*conn)?;
 
     if updated_rows == 0 {
-        return Err(bad_request("Email belonging to token not found."));
+        return Err(ErrorBuilder::bad_request(
+            "Email belonging to token not found.",
+        ));
     }
 
     ok_true()
@@ -189,24 +193,26 @@ pub fn regenerate_token_and_send(req: &mut dyn RequestExt) -> EndpointResult {
 
     let param_user_id = req.params()["user_id"]
         .parse::<i32>()
-        .chain_error(|| bad_request("invalid user_id"))?;
+        .chain_user_facing_fallback(|| UserFacing::bad_request("invalid user_id"))?;
     let authenticated_user = req.authenticate()?;
     let conn = req.db_conn()?;
     let user = authenticated_user.find_user(&conn)?;
 
     // need to check if current user matches user to be updated
     if user.id != param_user_id {
-        return Err(bad_request("current user does not match requested user"));
+        return Err(ErrorBuilder::bad_request(
+            "current user does not match requested user",
+        ));
     }
 
     conn.transaction(|| {
         let email = update(Email::belonging_to(&user))
             .set(emails::token.eq(sql("DEFAULT")))
             .get_result::<Email>(&*conn)
-            .map_err(|_| bad_request("Email could not be found"))?;
+            .map_err(|_| ErrorBuilder::bad_request("Email could not be found"))?;
 
         email::try_send_user_confirm_email(&email.email, &user.gh_login, &email.token)
-            .map_err(|_| server_error("Error in sending email"))
+            .map_err(|_| ErrorBuilder::server_error("Error in sending email"))
     })?;
 
     ok_true()
@@ -226,7 +232,7 @@ pub fn update_email_notifications(req: &mut dyn RequestExt) -> EndpointResult {
     let mut body = String::new();
     req.body().read_to_string(&mut body)?;
     let updates: HashMap<i32, bool> = serde_json::from_str::<Vec<CrateEmailNotifications>>(&body)
-        .map_err(|_| bad_request("invalid json request"))?
+        .map_err(|_| ErrorBuilder::bad_request("invalid json request"))?
         .iter()
         .map(|c| (c.id, c.email_notifications))
         .collect();

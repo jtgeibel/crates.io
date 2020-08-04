@@ -1,11 +1,11 @@
+// TODO: Move endpoints over to the main prelude. Cargo specific responses
+// end in _legacy and should be avoided for non-cargo endpoints
 mod cargo_prelude {
     pub use super::prelude::*;
-    pub use crate::util::errors::cargo_err;
 }
 
 mod frontend_prelude {
     pub use super::prelude::*;
-    pub use crate::util::errors::{bad_request, server_error};
 }
 
 pub(crate) use prelude::RequestUtils;
@@ -19,7 +19,9 @@ mod prelude {
 
     pub use crate::db::RequestTransaction;
     pub use crate::middleware::app::RequestApp;
-    pub use crate::util::errors::{cargo_err, AppError, AppResult, ChainError}; // TODO: Remove cargo_err from here
+    pub(crate) use crate::util::errors::{
+        AppResult, ChainError, ErrorBuilder, Forbidden, UserFacing,
+    };
     pub use crate::util::{AppResponse, EndpointResult};
 
     use indexmap::IndexMap;

@@ -41,29 +41,35 @@ pub fn new(req: &mut dyn RequestExt) -> EndpointResult {
     let max_size = 2000;
     let length = req
         .content_length()
-        .chain_error(|| bad_request("missing header: Content-Length"))?;
+        .ok_or_else(|| ErrorBuilder::bad_request("missing header: Content-Length"))?;
 
     if length > max_size {
-        return Err(bad_request(&format!("max content length is: {}", max_size)));
+        return Err(ErrorBuilder::custom_bad_request(format!(
+            "max content length is: {}",
+            max_size
+        )));
     }
 
     let mut json = vec![0; length as usize];
     read_fill(req.body(), &mut json)?;
 
-    let json =
-        String::from_utf8(json).map_err(|_| bad_request(&"json body was not valid utf-8"))?;
+    let json = String::from_utf8(json)
+        .map_err(|_| ErrorBuilder::bad_request("json body was not valid utf-8"))?;
 
-    let new: NewApiTokenRequest = json::from_str(&json)
-        .map_err(|e| bad_request(&format!("invalid new token request: {:?}", e)))?;
+    let new: NewApiTokenRequest = json::from_str(&json).map_err(|e| {
+        ErrorBuilder::custom_bad_request(format!("invalid new token request: {:?}", e))
+    })?;
 
     let name = &new.api_token.name;
     if name.is_empty() {
-        return Err(bad_request("name must have a value"));
+        return Err(ErrorBuilder::custom_bad_request(
+            "name must have a value".to_string(),
+        ));
     }
 
     let authenticated_user = req.authenticate()?;
     if authenticated_user.api_token_id().is_some() {
-        return Err(bad_request(
+        return Err(ErrorBuilder::bad_request(
             "cannot use an API token to create a new API token",
         ));
     }
@@ -76,7 +82,7 @@ pub fn new(req: &mut dyn RequestExt) -> EndpointResult {
         .count()
         .get_result::<i64>(&*conn)?;
     if count >= max_token_per_user {
-        return Err(bad_request(&format!(
+        return Err(ErrorBuilder::custom_bad_request(format!(
             "maximum tokens per user is: {}",
             max_token_per_user
         )));
@@ -97,7 +103,7 @@ pub fn new(req: &mut dyn RequestExt) -> EndpointResult {
 pub fn revoke(req: &mut dyn RequestExt) -> EndpointResult {
     let id = req.params()["id"]
         .parse::<i32>()
-        .map_err(|e| bad_request(&format!("invalid token id: {:?}", e)))?;
+        .map_err(|e| ErrorBuilder::custom_bad_request(format!("invalid token id: {:?}", e)))?;
 
     let authenticated_user = req.authenticate()?;
     let conn = req.db_conn()?;

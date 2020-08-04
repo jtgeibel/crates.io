@@ -26,7 +26,10 @@ fn extract_crate_name(req: &dyn RequestExt) -> &str {
 fn extract_semver(req: &dyn RequestExt) -> AppResult<&str> {
     let semver = &req.params()["version"];
     if semver::Version::parse(semver).is_err() {
-        return Err(cargo_err(&format_args!("invalid semver: {}", semver)));
+        return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
+            "invalid semver: {}",
+            semver
+        )));
     };
     Ok(semver)
 }

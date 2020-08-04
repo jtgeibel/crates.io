@@ -13,7 +13,7 @@ use crate::models::{
     Badge, Category, CrateOwner, CrateOwnerInvitation, Keyword, NewCrateOwnerInvitation, Owner,
     OwnerKind, ReverseDependency, User, Version,
 };
-use crate::util::errors::{cargo_err, AppResult};
+use crate::util::errors::{AppResult, ErrorBuilder};
 use crate::views::{EncodableCrate, EncodableCrateLinks};
 
 use crate::models::helpers::with_count::*;
@@ -139,7 +139,7 @@ impl<'a> NewCrate<'a> {
             // Manually check the string, as `Url::parse` may normalize relative URLs
             // making it difficult to ensure that both slashes are present.
             if !url.starts_with("http://") && !url.starts_with("https://") {
-                return Err(cargo_err(&format_args!(
+                return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
                     "URL for field `{}` must begin with http:// or https:// (url: {})",
                     field, url
                 )));
@@ -147,7 +147,10 @@ impl<'a> NewCrate<'a> {
 
             // Ensure the entire URL parses as well
             Url::parse(url).map_err(|_| {
-                cargo_err(&format_args!("`{}` is not a valid url: `{}`", field, url))
+                ErrorBuilder::custom_cargo_err_legacy(format!(
+                    "`{}` is not a valid url: `{}`",
+                    field, url
+                ))
             })?;
             Ok(())
         }
@@ -168,7 +171,9 @@ impl<'a> NewCrate<'a> {
         ))
         .get_result::<bool>(conn)?;
         if reserved_name {
-            Err(cargo_err("cannot upload a crate with a reserved name"))
+            Err(ErrorBuilder::cargo_err_legacy(
+                "cannot upload a crate with a reserved name",
+            ))
         } else {
             Ok(())
         }
@@ -248,7 +253,7 @@ impl Crate {
             .filter(versions::num.eq(version))
             .first(conn)
             .map_err(|_| {
-                cargo_err(&format_args!(
+                ErrorBuilder::custom_cargo_err_legacy(format!(
                     "crate `{}` does not have a version `{}`",
                     self.name, version
                 ))

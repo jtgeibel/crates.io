@@ -1,6 +1,8 @@
+use std::borrow::Cow;
+use std::error::Error;
 use std::fmt;
 
-use super::{AppError, InternalAppErrorStatic};
+use super::{ChainElement, ErrorBuilder};
 use crate::util::{json_response, AppResponse};
 
 use chrono::NaiveDateTime;
@@ -29,50 +31,58 @@ fn json_error(detail: &str, status: StatusCode) -> AppResponse {
 #[derive(Debug)]
 pub(crate) struct NotFound;
 
-// This struct has this helper impl for use as `NotFound.into()`
-impl From<NotFound> for AppResponse {
-    fn from(_: NotFound) -> AppResponse {
-        json_error("Not Found", StatusCode::NOT_FOUND)
-    }
-}
-
-impl AppError for NotFound {
-    fn response(&self) -> Option<AppResponse> {
-        Some(Self.into())
-    }
-}
+impl Error for NotFound {}
 
 impl fmt::Display for NotFound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        "Not Found".fmt(f)
+        "NotFound".fmt(f)
+    }
+}
+
+impl NotFound {
+    pub(crate) fn response(&self) -> AppResponse {
+        json_error("Not Found", StatusCode::NOT_FOUND)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn root_cause(&self) -> Box<ErrorBuilder> {
+        Box::new(ErrorBuilder {
+            chain: vec![ChainElement::Error(Box::new(Self))],
+            user_facing_response: Some(self.response()),
+        })
     }
 }
 
 #[derive(Debug)]
-pub(super) struct Forbidden;
-#[derive(Debug)]
-pub(crate) struct ReadOnlyMode;
+pub(crate) struct Forbidden;
 
-impl AppError for Forbidden {
-    fn response(&self) -> Option<AppResponse> {
-        let detail = "must be logged in to perform that action";
-        Some(json_error(detail, StatusCode::FORBIDDEN))
-    }
-}
+impl Error for Forbidden {}
 
 impl fmt::Display for Forbidden {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        "must be logged in to perform that action".fmt(f)
+        "Forbidden".fmt(f)
     }
 }
 
-impl AppError for ReadOnlyMode {
-    fn response(&self) -> Option<AppResponse> {
-        let detail = "Crates.io is currently in read-only mode for maintenance. \
-                      Please try again later.";
-        Some(json_error(detail, StatusCode::SERVICE_UNAVAILABLE))
+impl Forbidden {
+    pub(crate) fn response(&self) -> AppResponse {
+        let detail = "must be logged in to perform that action";
+        json_error(detail, StatusCode::FORBIDDEN)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn root_cause(&self) -> Box<ErrorBuilder> {
+        Box::new(ErrorBuilder {
+            chain: vec![ChainElement::Error(Box::new(Self))],
+            user_facing_response: Some(self.response()),
+        })
     }
 }
+
+#[derive(Debug)]
+pub(crate) struct ReadOnlyMode;
+
+impl Error for ReadOnlyMode {}
 
 impl fmt::Display for ReadOnlyMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -80,57 +90,62 @@ impl fmt::Display for ReadOnlyMode {
     }
 }
 
+impl ReadOnlyMode {
+    pub(crate) fn response(&self) -> AppResponse {
+        let detail = "Crates.io is currently in read-only mode for maintenance. \
+                      Please try again later.";
+        json_error(detail, StatusCode::SERVICE_UNAVAILABLE)
+    }
+
+    pub(crate) fn root_cause(&self) -> Box<ErrorBuilder> {
+        Box::new(ErrorBuilder {
+            chain: vec![ChainElement::Error(Box::new(Self))],
+            user_facing_response: Some(self.response()),
+        })
+    }
+}
+
 // The following structs wrap owned data and provide a custom message to the user
 
 #[derive(Debug)]
-pub(super) struct Ok(pub(super) String);
+pub(super) struct CargoLegacy(pub(super) Cow<'static, str>);
 #[derive(Debug)]
-pub(super) struct BadRequest(pub(super) String);
+pub(super) struct BadRequest(pub(super) Cow<'static, str>);
 #[derive(Debug)]
-pub(super) struct ServerError(pub(super) String);
+pub(super) struct ServerError(pub(super) &'static str);
 #[derive(Debug)]
 pub(crate) struct TooManyRequests {
     pub retry_after: NaiveDateTime,
 }
 
-impl AppError for Ok {
-    fn response(&self) -> Option<AppResponse> {
-        Some(json_error(&self.0, StatusCode::OK))
+impl CargoLegacy {
+    pub(crate) fn response(&self) -> AppResponse {
+        json_error(&self.0, StatusCode::OK)
     }
 }
 
-impl fmt::Display for Ok {
+impl BadRequest {
+    pub(crate) fn response(&self) -> AppResponse {
+        json_error(&self.0, StatusCode::BAD_REQUEST)
+    }
+}
+
+impl ServerError {
+    pub(crate) fn response(&self) -> AppResponse {
+        json_error(&self.0, StatusCode::INTERNAL_SERVER_ERROR)
+    }
+}
+
+impl Error for TooManyRequests {}
+
+impl fmt::Display for TooManyRequests {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        "TooManyRequests".fmt(f)
     }
 }
 
-impl AppError for BadRequest {
-    fn response(&self) -> Option<AppResponse> {
-        Some(json_error(&self.0, StatusCode::BAD_REQUEST))
-    }
-}
-
-impl fmt::Display for BadRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl AppError for ServerError {
-    fn response(&self) -> Option<AppResponse> {
-        Some(json_error(&self.0, StatusCode::INTERNAL_SERVER_ERROR))
-    }
-}
-
-impl fmt::Display for ServerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl AppError for TooManyRequests {
-    fn response(&self) -> Option<AppResponse> {
+impl TooManyRequests {
+    pub(crate) fn response(&self) -> AppResponse {
         use std::convert::TryInto;
 
         const HTTP_DATE_FORMAT: &str = "%a, %d %b %Y %H:%M:%S GMT";
@@ -150,41 +165,31 @@ impl AppError for TooManyRequests {
                 .try_into()
                 .expect("HTTP_DATE_FORMAT contains invalid char"),
         );
-        Some(response)
-    }
-}
-
-impl fmt::Display for TooManyRequests {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        "Too many requests".fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct InsecurelyGeneratedTokenRevoked;
-
-impl InsecurelyGeneratedTokenRevoked {
-    pub fn boxed() -> Box<dyn AppError> {
-        Box::new(Self)
-    }
-}
-
-impl AppError for InsecurelyGeneratedTokenRevoked {
-    fn response(&self) -> Option<AppResponse> {
-        Some(json_error(&self.to_string(), StatusCode::UNAUTHORIZED))
+        response
     }
 
-    fn cause(&self) -> Option<&dyn AppError> {
-        Some(&InternalAppErrorStatic {
-            description: "insecurely generated, revoked 2020-07",
+    pub(crate) fn root_cause(self) -> Box<ErrorBuilder> {
+        Box::new(ErrorBuilder {
+            user_facing_response: Some(self.response()),
+            chain: vec![ChainElement::Error(Box::new(self))],
         })
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct InsecurelyGeneratedTokenRevoked;
+
+impl Error for InsecurelyGeneratedTokenRevoked {}
+
 impl fmt::Display for InsecurelyGeneratedTokenRevoked {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(
-            "The given API token does not match the format used by crates.io. \
+        "insecurely generated, revoked 2020-07".fmt(f)
+    }
+}
+
+impl InsecurelyGeneratedTokenRevoked {
+    fn response(&self) -> AppResponse {
+        let detail = "The given API token does not match the format used by crates.io. \
             \
             Tokens generated before 2020-07-14 were generated with an insecure \
             random number generator, and have been revoked. You can generate a \
@@ -192,8 +197,14 @@ impl fmt::Display for InsecurelyGeneratedTokenRevoked {
             \
             For more information please see \
             https://blog.rust-lang.org/2020/07/14/crates-io-security-advisory.html. \
-            We apologize for any inconvenience.",
-        )?;
-        Result::Ok(())
+            We apologize for any inconvenience.";
+        json_error(detail, StatusCode::UNAUTHORIZED)
+    }
+
+    pub(crate) fn root_cause(&self) -> Box<ErrorBuilder> {
+        Box::new(ErrorBuilder {
+            chain: vec![ChainElement::Error(Box::new(Self))],
+            user_facing_response: Some(self.response()),
+        })
     }
 }

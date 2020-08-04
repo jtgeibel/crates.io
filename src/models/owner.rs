@@ -3,7 +3,7 @@ use diesel::prelude::*;
 
 use crate::app::App;
 use crate::github;
-use crate::util::errors::{cargo_err, AppResult};
+use crate::util::errors::{AppResult, ErrorBuilder};
 
 use crate::models::{Crate, Team, User};
 use crate::schema::{crate_owners, users};
@@ -76,7 +76,12 @@ impl Owner {
                 .order(users::gh_id.desc())
                 .first(conn)
                 .map(Owner::User)
-                .map_err(|_| cargo_err(&format_args!("could not find user with login `{}`", name)))
+                .map_err(|_| {
+                    ErrorBuilder::custom_cargo_err_legacy(format!(
+                        "could not find user with login `{}`",
+                        name
+                    ))
+                })
         }
     }
 

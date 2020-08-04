@@ -3,7 +3,7 @@ use flate2::read::GzDecoder;
 use reqwest::{blocking::Client, header};
 use sha2::{Digest, Sha256};
 
-use crate::util::errors::{cargo_err, internal, AppResult, ChainError};
+use crate::util::errors::{AppResult, ChainError, ErrorBuilder, UserFacing};
 use crate::util::{Error, LimitErrorReader, Maximums};
 
 use std::env;
@@ -154,7 +154,7 @@ impl Uploader {
             "application/x-tar",
             extra_headers,
         )
-        .map_err(|e| internal(&format_args!("failed to upload crate: {}", e)))?;
+        .map_err(|e| ErrorBuilder::internal(format!("failed to upload crate: {}", e).into()))?;
         Ok(checksum.into())
     }
 
@@ -199,8 +199,10 @@ fn verify_tarball(
     let mut archive = tar::Archive::new(decoder);
     let prefix = format!("{}-{}", krate.name, vers);
     for entry in archive.entries()? {
-        let entry = entry.chain_error(|| {
-            cargo_err("uploaded tarball is malformed or too large when decompressed")
+        let entry = entry.chain_user_facing_fallback(|| {
+            UserFacing::cargo_err_legacy(
+                "uploaded tarball is malformed or too large when decompressed",
+            )
         })?;
 
         // Verify that all entries actually start with `$name-$vers/`.
@@ -209,7 +211,7 @@ fn verify_tarball(
         // as `bar-0.1.0/` source code, and this could overwrite other crates in
         // the registry!
         if !entry.path()?.starts_with(&prefix) {
-            return Err(cargo_err("invalid tarball uploaded"));
+            return Err(ErrorBuilder::cargo_err_legacy("invalid tarball uploaded"));
         }
 
         // Historical versions of the `tar` crate which Cargo uses internally
@@ -219,7 +221,7 @@ fn verify_tarball(
         // generate a tarball with these file types so this should work for now.
         let entry_type = entry.header().entry_type();
         if entry_type.is_hard_link() || entry_type.is_symlink() {
-            return Err(cargo_err("invalid tarball uploaded"));
+            return Err(ErrorBuilder::cargo_err_legacy("invalid tarball uploaded"));
         }
     }
     Ok(())

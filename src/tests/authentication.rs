@@ -6,13 +6,13 @@ use conduit::{header, Handler, HandlerResult, Method, RequestExt, StatusCode};
 use conduit_test::MockRequest;
 
 static URL: &str = "/api/v1/me/updates";
-static MUST_LOGIN: &[u8] =
-    b"{\"errors\":[{\"detail\":\"must be logged in to perform that action\"}]}";
+static MUST_LOGIN: &[u8] = br#"{"errors":[{"detail":"must be logged in to perform that action"}]}"#;
+static INTERNAL_SERVER_ERROR: &[u8] = br#"{"errors":[{"detail":"Internal Server Error"}]}"#;
 static INTERNAL_ERROR_NO_USER: &str =
     "user_id from cookie or token not found in database caused by NotFound";
 
-fn call(app: &TestApp, mut request: MockRequest) -> HandlerResult {
-    app.as_middleware().call(&mut request)
+fn call(app: &TestApp, request: &mut MockRequest) -> HandlerResult {
+    app.as_middleware().call(request)
 }
 
 fn into_parts(response: HandlerResult) -> (StatusCode, std::borrow::Cow<'static, [u8]>) {
@@ -25,9 +25,9 @@ fn into_parts(response: HandlerResult) -> (StatusCode, std::borrow::Cow<'static,
 #[test]
 fn anonymous_user_unauthorized() {
     let (app, anon) = TestApp::init().empty();
-    let request = anon.request_builder(Method::GET, URL);
+    let mut request = anon.request_builder(Method::GET, URL);
 
-    let (status, body) = into_parts(call(&app, request));
+    let (status, body) = into_parts(call(&app, &mut request));
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body, MUST_LOGIN);
 }
@@ -38,7 +38,7 @@ fn token_auth_cannot_find_token() {
     let mut request = anon.request_builder(Method::GET, URL);
     request.header(header::AUTHORIZATION, "cio1tkfake-token");
 
-    let (status, body) = into_parts(call(&app, request));
+    let (status, body) = into_parts(call(&app, &mut request));
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body, MUST_LOGIN);
 }
@@ -52,7 +52,12 @@ fn cookie_auth_cannot_find_user() {
     let mut request = anon.request_builder(Method::GET, URL);
     request.mut_extensions().insert(TrustedUserId(-1));
 
-    let response = call(&app, request);
-    let log_message = response.map(|_| ()).unwrap_err().to_string();
-    assert_eq!(log_message, INTERNAL_ERROR_NO_USER);
+    let (status, body) = into_parts(call(&app, &mut request));
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body, INTERNAL_SERVER_ERROR);
+
+    assert_eq!(
+        cargo_registry::middleware::log_request::get_log_message(&request, "cause"),
+        INTERNAL_ERROR_NO_USER
+    );
 }

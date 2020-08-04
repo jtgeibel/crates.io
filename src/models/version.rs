@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
-use crate::util::errors::{cargo_err, AppResult};
+use crate::util::errors::{AppResult, ErrorBuilder};
 
 use crate::models::{Crate, Dependency, User, VersionOwnerAction};
 use crate::schema::*;
@@ -203,7 +203,7 @@ impl NewVersion {
                 .filter(crate_id.eq(self.crate_id))
                 .filter(num.eq(&self.num));
             if select(exists(already_uploaded)).get_result(conn)? {
-                return Err(cargo_err(&format_args!(
+                return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
                     "crate version `{}` is already \
                      uploaded",
                     self.num
@@ -237,7 +237,7 @@ impl NewVersion {
         if let Some(ref license) = self.license {
             for part in license.split('/') {
                 license_exprs::validate_license_expr(part).map_err(|e| {
-                    cargo_err(&format_args!(
+                    ErrorBuilder::custom_cargo_err_legacy(format!(
                         "{}; see http://opensource.org/licenses \
                          for options, and http://spdx.org/licenses/ \
                          for their identifiers",

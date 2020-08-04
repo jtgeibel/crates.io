@@ -73,7 +73,7 @@ impl Handler for EmberHtml {
                 // This is to preserve legacy behavior and will likely change.
                 // Most of these crawlers probably won't execute our frontend JS anyway, but
                 // it would be nice to bootstrap the app for crawlers that do execute JS.
-                Ok(NotFound.into())
+                Ok(NotFound.response())
             }
         }
     }

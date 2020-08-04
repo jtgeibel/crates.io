@@ -3,9 +3,6 @@ use super::prelude::*;
 use crate::middleware::current_user::TrustedUserId;
 use crate::middleware::log_request;
 use crate::models::{ApiToken, User};
-use crate::util::errors::{
-    forbidden, internal, AppError, AppResult, ChainError, InsecurelyGeneratedTokenRevoked,
-};
 
 #[derive(Debug)]
 pub struct AuthenticatedUser {
@@ -24,7 +21,8 @@ impl AuthenticatedUser {
 
     pub fn find_user(&self, conn: &PgConnection) -> AppResult<User> {
         User::find(conn, self.user_id())
-            .chain_error(|| internal("user_id from cookie or token not found in database"))
+            .chain_internal_err_cause("user_id from cookie or token not found in database")
+            .chain_user_facing_fallback(|| UserFacing::server_error("Internal Server Error"))
     }
 }
 
@@ -52,8 +50,8 @@ fn verify_origin(req: &dyn RequestExt) -> AppResult<()> {
             "only same-origin requests can be authenticated. got {:?}",
             bad_origin
         );
-        return Err(internal(&error_message))
-            .chain_error(|| Box::new(forbidden()) as Box<dyn AppError>);
+        return Err(ErrorBuilder::internal(error_message.into()))
+            .chain_user_facing_fallback(|| Forbidden.response());
     }
     Ok(())
 }
@@ -84,20 +82,18 @@ impl<'a> UserAuthenticationExt for dyn RequestExt + 'a {
                             user_id: token.user_id,
                             token_id: Some(token.id),
                         })
-                        .map_err(|e| {
-                            if e.is::<InsecurelyGeneratedTokenRevoked>() {
-                                e
-                            } else {
-                                e.chain(internal("invalid token")).chain(forbidden())
-                            }
-                        })?
+                        .chain_internal_err_cause("invalid token")
+                        .chain_user_facing_fallback(|| Forbidden.response())?
                 };
                 log_request::add_custom_metadata(self, "uid", user.user_id);
                 log_request::add_custom_metadata(self, "tokenid", user.token_id.unwrap_or(0));
                 Ok(user)
             } else {
                 // Unable to authenticate the user
-                Err(internal("no cookie session or auth header found")).chain_error(forbidden)
+                Err(ErrorBuilder::internal(
+                    "no cookie session or auth header found".into(),
+                ))
+                .chain_user_facing_fallback(|| Forbidden.response())
             }
         }
     }

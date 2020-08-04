@@ -79,12 +79,12 @@ fn parse_owners_request(req: &mut dyn RequestExt) -> AppResult<Vec<String>> {
         users: Option<Vec<String>>,
         owners: Option<Vec<String>>,
     }
-    let request: Request =
-        serde_json::from_str(&body).map_err(|_| cargo_err("invalid json request"))?;
+    let request: Request = serde_json::from_str(&body)
+        .map_err(|_| ErrorBuilder::cargo_err_legacy("invalid json request"))?;
     request
         .owners
         .or(request.users)
-        .ok_or_else(|| cargo_err("invalid json request"))
+        .ok_or_else(|| ErrorBuilder::cargo_err_legacy("invalid json request"))
 }
 
 fn modify_owners(req: &mut dyn RequestExt, add: bool) -> EndpointResult {
@@ -104,12 +104,14 @@ fn modify_owners(req: &mut dyn RequestExt, add: bool) -> EndpointResult {
             Rights::Full => {}
             // Yes!
             Rights::Publish => {
-                return Err(cargo_err(
+                return Err(ErrorBuilder::cargo_err_legacy(
                     "team members don't have permission to modify owners",
                 ));
             }
             Rights::None => {
-                return Err(cargo_err("only owners have permission to modify owners"));
+                return Err(ErrorBuilder::cargo_err_legacy(
+                    "only owners have permission to modify owners",
+                ));
             }
         }
 
@@ -119,7 +121,10 @@ fn modify_owners(req: &mut dyn RequestExt, add: bool) -> EndpointResult {
                 let login_test =
                     |owner: &Owner| owner.login().to_lowercase() == *login.to_lowercase();
                 if owners.iter().any(login_test) {
-                    return Err(cargo_err(&format_args!("`{}` is already an owner", login)));
+                    return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
+                        "`{}` is already an owner",
+                        login
+                    )));
                 }
                 let msg = krate.owner_add(app, &conn, &user, login)?;
                 msgs.push(msg);
@@ -130,7 +135,7 @@ fn modify_owners(req: &mut dyn RequestExt, add: bool) -> EndpointResult {
                 krate.owner_remove(app, &conn, &user, login)?;
             }
             if User::owning(&krate, &conn)?.is_empty() {
-                return Err(cargo_err(
+                return Err(ErrorBuilder::cargo_err_legacy(
                     "cannot remove all individual owners of a crate. \
                      Team member don't have permission to modify owners, so \
                      at least one individual owner is required.",

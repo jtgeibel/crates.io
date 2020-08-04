@@ -2,7 +2,7 @@ use diesel::prelude::*;
 
 use crate::app::App;
 use crate::github::{github_api, team_url, GhNotFound};
-use crate::util::errors::{cargo_err, AppResult};
+use crate::util::errors::{AppResult, ErrorBuilder};
 
 use oauth2::AccessToken;
 
@@ -87,7 +87,7 @@ impl Team {
                 // unwrap is documented above as part of the calling contract
                 let org = chunks.next().unwrap();
                 let team = chunks.next().ok_or_else(|| {
-                    cargo_err(
+                    ErrorBuilder::cargo_err_legacy(
                         "missing github team argument; \
                          format is github:org:team",
                     )
@@ -101,7 +101,7 @@ impl Team {
                     req_user,
                 )
             }
-            _ => Err(cargo_err(
+            _ => Err(ErrorBuilder::cargo_err_legacy(
                 "unknown organization handler, \
                  only 'github:org:team' is supported",
             )),
@@ -128,7 +128,7 @@ impl Team {
         }
 
         if let Some(c) = org_name.chars().find(|c| !is_allowed_char(*c)) {
-            return Err(cargo_err(&format_args!(
+            return Err(ErrorBuilder::custom_cargo_err_legacy(format!(
                 "organization cannot contain special \
                  characters like {}",
                 c
@@ -144,14 +144,16 @@ impl Team {
         let url = format!("/orgs/{}/teams/{}", org_name, team_name);
         let token = AccessToken::new(req_user.gh_access_token.clone());
         let team = github_api::<GithubTeam>(app, &url, &token).map_err(|_| {
-            cargo_err(&format_args!(
+            ErrorBuilder::custom_cargo_err_legacy(format!(
                 "could not find the github team {}/{}",
                 org_name, team_name
             ))
         })?;
 
         if !team_with_gh_id_contains_user(app, team.id, req_user)? {
-            return Err(cargo_err("only members of a team can add it as an owner"));
+            return Err(ErrorBuilder::cargo_err_legacy(
+                "only members of a team can add it as an owner",
+            ));
         }
 
         #[derive(Deserialize)]
@@ -221,7 +223,7 @@ fn team_with_gh_id_contains_user(app: &App, github_id: i32, user: &User) -> AppR
     let token = AccessToken::new(user.gh_access_token.clone());
     let membership = match github_api::<Membership>(app, &url, &token) {
         // Officially how `false` is returned
-        Err(ref e) if e.is::<GhNotFound>() => return Ok(false),
+        Err(e) if e.root_cause_is::<GhNotFound>() => return Ok(false),
         x => x?,
     };
 

@@ -60,10 +60,24 @@ pub fn add_custom_metadata<V: Display>(req: &mut dyn RequestExt, key: &'static s
     }
 }
 
-#[cfg(test)]
-pub(crate) fn get_log_message(req: &dyn RequestExt, key: &'static str) -> String {
+/// Obtain the log message for the provided key, panicing if not found.
+///
+/// This function is only public so that it can be used by endpoint tests.
+///
+/// # Panics
+///
+/// This function panics if the expected log message is not found.
+pub fn get_log_message(req: &dyn RequestExt, key: &'static str) -> String {
     // Unwrap shouldn't panic as no other code has access to the private struct to remove it
-    for (k, v) in &req.extensions().find::<CustomMetadata>().unwrap().entries {
+    for (k, v) in &mut req
+        .extensions()
+        .find::<CustomMetadata>()
+        .unwrap()
+        .entries
+        .iter()
+        // In tests, metadata can accumulate when a request is reused, so search in reverse
+        .rev()
+    {
         if key == *k {
             return v.clone();
         }

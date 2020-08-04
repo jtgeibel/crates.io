@@ -59,7 +59,7 @@ impl ApiToken {
         use diesel::{dsl::now, update};
 
         if !token_.starts_with(TOKEN_PREFIX) {
-            return Err(InsecurelyGeneratedTokenRevoked::boxed());
+            return Err(InsecurelyGeneratedTokenRevoked.root_cause());
         }
 
         let tokens = api_tokens
