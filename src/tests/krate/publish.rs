@@ -569,10 +569,13 @@ fn new_krate_dependency_missing() {
 
 #[test]
 fn new_krate_with_readme() {
-    let (_, _, _, token) = TestApp::full().with_token();
+    let (app, _, _, token) = TestApp::full().with_token();
 
     let crate_to_publish = PublishBuilder::new("foo_readme").readme("");
     let json = token.enqueue_publish(crate_to_publish).good();
+    debug!("before");
+    app.run_pending_background_jobs();
+    debug!("after");
 
     assert_eq!(json.krate.name, "foo_readme");
     assert_eq!(json.krate.max_version, "1.0.0");

@@ -1,7 +1,8 @@
 use crate::{
     builders::CrateBuilder, new_category, util::MockAnonymousUser, RequestHelper, TestApp,
 };
-use cargo_registry::{models::Category, views::EncodableCategoryWithSubcategories};
+use cargo_registry::models::{Category, Crate};
+use cargo_registry::views::EncodableCategoryWithSubcategories;
 
 #[derive(Deserialize)]
 struct CategoryWithSubcategories {
@@ -67,72 +68,78 @@ fn update_crate() {
         json.category.crates_cnt as usize
     }
 
+    #[track_caller]
+    fn update_crate(app: &TestApp, krate: &Crate, slugs: &[&str]) -> Vec<String> {
+        app.db(|conn| Category::update_crate(conn, krate, slugs).unwrap())
+    }
+
     let (app, anon, user) = TestApp::init().with_user();
     let user = user.as_model();
 
-    app.db(|conn| {
+    let krate = app.db(|conn| {
         assert_ok!(new_category("cat1", "cat1", "Category 1 crates").create_or_update(conn));
         assert_ok!(
             new_category("Category 2", "category-2", "Category 2 crates").create_or_update(conn)
         );
-        let krate = CrateBuilder::new("foo_crate", user.id).expect_build(&conn);
-
-        // Updating with no categories has no effect
-        Category::update_crate(conn, &krate, &[]).unwrap();
-        assert_eq!(count(&anon, "cat1"), 0);
-        assert_eq!(count(&anon, "category-2"), 0);
-
-        // Happy path adding one category
-        Category::update_crate(conn, &krate, &["cat1"]).unwrap();
-        assert_eq!(count(&anon, "cat1"), 1);
-        assert_eq!(count(&anon, "category-2"), 0);
-
-        // Replacing one category with another
-        Category::update_crate(conn, &krate, &["category-2"]).unwrap();
-        assert_eq!(count(&anon, "cat1"), 0);
-        assert_eq!(count(&anon, "category-2"), 1);
-
-        // Removing one category
-        Category::update_crate(conn, &krate, &[]).unwrap();
-        assert_eq!(count(&anon, "cat1"), 0);
-        assert_eq!(count(&anon, "category-2"), 0);
-
-        // Adding 2 categories
-        Category::update_crate(conn, &krate, &["cat1", "category-2"]).unwrap();
-        assert_eq!(count(&anon, "cat1"), 1);
-        assert_eq!(count(&anon, "category-2"), 1);
-
-        // Removing all categories
-        Category::update_crate(conn, &krate, &[]).unwrap();
-        assert_eq!(count(&anon, "cat1"), 0);
-        assert_eq!(count(&anon, "category-2"), 0);
-
-        // Attempting to add one valid category and one invalid category
-        let invalid_categories =
-            Category::update_crate(conn, &krate, &["cat1", "catnope"]).unwrap();
-        assert_eq!(invalid_categories, vec!["catnope"]);
-        assert_eq!(count(&anon, "cat1"), 1);
-        assert_eq!(count(&anon, "category-2"), 0);
-
-        // Does not add the invalid category to the category list
-        // (unlike the behavior of keywords)
-        let json = anon.show_category_list();
-        assert_eq!(json.categories.len(), 2);
-        assert_eq!(json.meta.total, 2);
-
-        // Attempting to add a category by display text; must use slug
-        Category::update_crate(conn, &krate, &["Category 2"]).unwrap();
-        assert_eq!(count(&anon, "cat1"), 0);
-        assert_eq!(count(&anon, "category-2"), 0);
-
-        // Add a category and its subcategory
-        assert_ok!(new_category("cat1::bar", "cat1::bar", "bar crates").create_or_update(conn));
-        Category::update_crate(&conn, &krate, &["cat1", "cat1::bar"]).unwrap();
-
-        assert_eq!(count(&anon, "cat1"), 1);
-        assert_eq!(count(&anon, "cat1::bar"), 1);
-        assert_eq!(count(&anon, "category-2"), 0);
+        CrateBuilder::new("foo_crate", user.id).expect_build(&conn)
     });
+
+    // Updating with no categories has no effect
+    update_crate(&app, &krate, &[]);
+    assert_eq!(count(&anon, "cat1"), 0);
+    assert_eq!(count(&anon, "category-2"), 0);
+
+    // Happy path adding one category
+    update_crate(&app, &krate, &["cat1"]);
+    assert_eq!(count(&anon, "cat1"), 1);
+    assert_eq!(count(&anon, "category-2"), 0);
+
+    // Replacing one category with another
+    update_crate(&app, &krate, &["category-2"]);
+    assert_eq!(count(&anon, "cat1"), 0);
+    assert_eq!(count(&anon, "category-2"), 1);
+
+    // Removing one category
+    update_crate(&app, &krate, &[]);
+    assert_eq!(count(&anon, "cat1"), 0);
+    assert_eq!(count(&anon, "category-2"), 0);
+
+    // Adding 2 categories
+    update_crate(&app, &krate, &["cat1", "category-2"]);
+    assert_eq!(count(&anon, "cat1"), 1);
+    assert_eq!(count(&anon, "category-2"), 1);
+
+    // Removing all categories
+    update_crate(&app, &krate, &[]);
+    assert_eq!(count(&anon, "cat1"), 0);
+    assert_eq!(count(&anon, "category-2"), 0);
+
+    // Attempting to add one valid category and one invalid category
+    let invalid_categories = update_crate(&app, &krate, &["cat1", "catnope"]);
+    assert_eq!(invalid_categories, vec!["catnope"]);
+    assert_eq!(count(&anon, "cat1"), 1);
+    assert_eq!(count(&anon, "category-2"), 0);
+
+    // Does not add the invalid category to the category list
+    // (unlike the behavior of keywords)
+    let json = anon.show_category_list();
+    assert_eq!(json.categories.len(), 2);
+    assert_eq!(json.meta.total, 2);
+
+    // Attempting to add a category by display text; must use slug
+    update_crate(&app, &krate, &["Category 2"]);
+    assert_eq!(count(&anon, "cat1"), 0);
+    assert_eq!(count(&anon, "category-2"), 0);
+
+    // Add a category and its subcategory
+    app.db(|conn| {
+        assert_ok!(new_category("cat1::bar", "cat1::bar", "bar crates").create_or_update(conn));
+    });
+    update_crate(&app, &krate, &["cat1", "cat1::bar"]);
+
+    assert_eq!(count(&anon, "cat1"), 1);
+    assert_eq!(count(&anon, "cat1::bar"), 1);
+    assert_eq!(count(&anon, "category-2"), 0);
 }
 
 #[test]

@@ -148,11 +148,14 @@ impl TestApp {
             .collect()
     }
 
+    #[track_caller]
     pub fn run_pending_background_jobs(&self) {
         let runner = &self.0.runner;
         let runner = runner.as_ref().expect("Index has not been initialized");
 
+        debug!("pre-run_all_pending_jobs");
         runner.run_all_pending_jobs().expect("Could not run jobs");
+        debug!("pre-check_for_failed_jobs");
         runner
             .check_for_failed_jobs()
             .expect("Could not determine if jobs failed");

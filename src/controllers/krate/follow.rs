@@ -3,19 +3,12 @@
 use diesel::associations::Identifiable;
 
 use crate::controllers::frontend_prelude::*;
-use crate::db::DieselPooledConn;
 use crate::models::{Crate, Follow};
 use crate::schema::*;
 
-fn follow_target(
-    req: &dyn RequestExt,
-    conn: &DieselPooledConn<'_>,
-    user_id: i32,
-) -> AppResult<Follow> {
+fn follow_target(req: &dyn RequestExt, conn: &PgConnection, user_id: i32) -> AppResult<Follow> {
     let crate_name = &req.params()["crate_id"];
-    let crate_id = Crate::by_name(crate_name)
-        .select(crates::id)
-        .first(&**conn)?;
+    let crate_id = Crate::by_name(crate_name).select(crates::id).first(conn)?;
     Ok(Follow { user_id, crate_id })
 }
 

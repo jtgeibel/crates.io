@@ -58,8 +58,8 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
     req.log_metadata("crate_name", new_crate.name.to_string());
     req.log_metadata("crate_version", new_crate.vers.to_string());
 
-    let conn = app.primary_database.get()?;
     let ids = req.authenticate()?;
+    let conn = app.primary_database.get()?;
     let api_token_id = ids.api_token_id();
     let user = ids.user();
 

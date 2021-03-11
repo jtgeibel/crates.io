@@ -62,6 +62,13 @@ pub fn add_custom_metadata<V: Display>(req: &mut dyn RequestExt, key: &'static s
     }
 }
 
+pub fn add_elapsed_duration(req: &mut dyn RequestExt, key: &'static str) {
+    let response_time = req.elapsed();
+    let response_time =
+        response_time.as_secs() * 1000 + u64::from(response_time.subsec_nanos()) / 1_000_000;
+    add_custom_metadata(req, key, TimeMs(response_time));
+}
+
 fn report_to_sentry(req: &dyn RequestExt, res: &AfterResult, response_time: u64) {
     let (message, level) = match res {
         Err(e) => (e.to_string(), Level::Error),

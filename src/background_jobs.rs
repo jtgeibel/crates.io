@@ -9,14 +9,16 @@ use crate::db::{DieselPool, DieselPooledConn};
 use crate::git::Repository;
 use crate::uploaders::Uploader;
 
-impl<'a> swirl::db::BorrowedConnection<'a> for DieselPool {
-    type Connection = DieselPooledConn<'a>;
+impl swirl::db::BorrowedConnection<'_> for DieselPool {
+    type Connection = DieselPooledConn;
 }
 
 impl swirl::db::DieselPool for DieselPool {
     type Error = PoolError;
 
+    #[track_caller]
     fn get(&self) -> Result<swirl::db::DieselPooledConn<'_, Self>, Self::Error> {
+        debug!("swirl::db::DieselPool::get()");
         self.get()
     }
 }

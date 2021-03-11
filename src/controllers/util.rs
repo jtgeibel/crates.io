@@ -56,8 +56,10 @@ fn verify_origin(req: &dyn RequestExt) -> AppResult<()> {
     Ok(())
 }
 
-fn authenticate_user(req: &dyn RequestExt) -> AppResult<AuthenticatedUser> {
+#[track_caller]
+fn authenticate_user(req: &mut dyn RequestExt) -> AppResult<AuthenticatedUser> {
     let conn = req.db_conn()?;
+    //log_request::add_elapsed_duration(req, "db_for_auth");
 
     let session = req.session();
     let user_id_from_session = session.get("user_id").and_then(|s| s.parse::<i32>().ok());
@@ -102,6 +104,7 @@ fn authenticate_user(req: &dyn RequestExt) -> AppResult<AuthenticatedUser> {
 
 impl<'a> UserAuthenticationExt for dyn RequestExt + 'a {
     /// Obtain `AuthenticatedUser` for the request or return an `Forbidden` error
+    #[track_caller]
     fn authenticate(&mut self) -> AppResult<AuthenticatedUser> {
         verify_origin(self)?;
 
