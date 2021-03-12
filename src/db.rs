@@ -1,14 +1,15 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::cell::{Ref, RefCell};
+//use std::rc::Rc;
+//use std::sync::{Arc, Mutex, MutexGuard};
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
-use std::thread::{self, ThreadId};
+//use std::thread::{self, ThreadId};
 
 use conduit::RequestExt;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager, CustomizeConnection};
 use url::Url;
+use owning_ref::{MutexGuardRef, OwningRef};
 
 use crate::middleware::app::RequestApp;
 use crate::Env;
@@ -19,18 +20,25 @@ use crossbeam::channel::{self, Receiver, Sender};
 #[derive(Clone)]
 pub enum DieselPool {
     Pool(r2d2::Pool<ConnectionManager<PgConnection>>),
-    Test(FakeSendSync<PgConnection>),
+    Test {
+        tx: Sender<PgConnection>,
+        rx: Receiver<PgConnection>,
+    },
 }
 
 impl DieselPool {
-    #[track_caller]
+    //#[track_caller]
     pub fn get(&self) -> Result<DieselPooledConn, r2d2::PoolError> {
         match self {
             DieselPool::Pool(pool) => Ok(DieselPooledConn::Pool(pool.get()?)),
-            DieselPool::Test(conn) => {
-                debug!("DieselPool::get");
+            DieselPool::Test { tx, rx } => {
+                debug!("DieselPool::get() {:?}", std::thread::current().id());
                 //let conn = rx.recv_timeout(Duration::from_millis(1000)).unwrap();
-                Ok(DieselPooledConn::Test(conn.clone()))
+                Ok(DieselPooledConn::Test {
+                    tx: tx.clone(),
+                    rx: rx.clone(),
+                    conn: RefCell::new(None), //RefCell::new(Some(conn)),
+                })
                 //Ok(DieselPooledConn::Test(conn.lock().unwrap().take().unwrap()))//.expect("multiple attemtps to get a connection from the pool, but tests only have 1 connection")))
             }
         }
@@ -44,41 +52,60 @@ impl DieselPool {
     }
 
     fn test_conn(conn: PgConnection) -> Self {
-        //let (tx, rx) = channel::bounded(1);
-        //tx.send(conn).unwrap();
-        DieselPool::Test(FakeSendSync::new(conn))
+        let (tx, rx) = channel::bounded(1);
+        tx.send(conn).unwrap();
+        DieselPool::Test { tx, rx }
     }
 }
 
 #[allow(missing_debug_implementations)]
 pub enum DieselPooledConn {
     Pool(r2d2::PooledConnection<ConnectionManager<PgConnection>>),
-    Test(FakeSendSync<PgConnection>),
+    Test {
+        tx: Sender<PgConnection>,
+        rx: Receiver<PgConnection>,
+        conn: RefCell<Option<PgConnection>>,
+    },
 }
 
 //unsafe impl<'a> Send for DieselPooledConn<'a> {}
 
-//impl Drop for DieselPooledConn {
-//    fn drop(&mut self) {
-//        match self {
-//            DieselPooledConn::Pool(_) => (),
-//            DieselPooledConn::Test { tx, conn } => {
-//                debug!("DieselPooledConn::drop()");
-//                let conn = conn.take().expect("somebody stole the test connection");
-//                tx.send(conn).unwrap();
-//            }
-//        }
-//    }
-//}
+impl Drop for DieselPooledConn {
+    fn drop(&mut self) {
+        match self {
+            DieselPooledConn::Pool(_) => (),
+            DieselPooledConn::Test { tx, conn, .. } => {
+                debug!("DieselPooledConn::drop() {:?}", std::thread::current().id());
+                conn.undo_leak();
+                if let Some(conn) = conn.take() {
+                    debug!("Returning connection to channel");
+                    tx.send(conn).unwrap();
+                }
+                //let conn = conn.take().expect("somebody stole the test connection");
+                //tx.send(conn).unwrap();
+            }
+        }
+    }
+}
 
 impl Deref for DieselPooledConn {
     type Target = PgConnection;
 
-    #[track_caller]
+    //#[track_caller]
     fn deref(&self) -> &Self::Target {
         match self {
             DieselPooledConn::Pool(conn) => conn.deref(),
-            DieselPooledConn::Test(conn) => conn.deref(),
+            DieselPooledConn::Test { conn, rx, .. } => {
+                debug!("DieselPooledConn::deref() {:?}", std::thread::current().id());
+
+                if !conn.borrow().is_some() {
+                    let mut borrow = conn.borrow_mut();
+                    *borrow = Some(rx.recv_timeout(Duration::from_millis(1000)).unwrap());
+                }
+
+                let value = Ref::leak(conn.borrow());
+                value.as_ref().unwrap()
+            },
         }
     }
 }
@@ -164,58 +191,58 @@ impl CustomizeConnection<PgConnection, r2d2::Error> for ConnectionConfig {
     }
 }
 
-#[allow(missing_debug_implementations)]
-pub struct FakeSendSync<T> {
-    test_thread_id: ThreadId,
-    other_thread_id: Option<ThreadId>,
-    value: Arc<T>,
-}
-
-unsafe impl<T> Send for FakeSendSync<T> {}
-unsafe impl<T> Sync for FakeSendSync<T> {}
-
-impl<T> FakeSendSync<T> {
-    fn new(value: T) -> Self {
-        let test_thread_id = thread::current().id();
-        debug!("FakeSendSync::new() with strong_count=1 on thread {:?}", test_thread_id);
-        Self {
-            test_thread_id,
-            other_thread_id: None,
-            value: Arc::new(value),
-        }
-    }
-}
-
-impl<T> Deref for FakeSendSync<T> {
-    type Target = T;
-
-    #[track_caller]
-    fn deref(&self) -> &Self::Target {
-        // FIXME
-        debug!("FakeSendSync::deref() with strong_count={} on thread {:?}", Arc::strong_count(&self.value), thread::current().id());
-        // TODO: Switch back to assert_eq!
-        if self.test_thread_id != thread::current().id() {
-            error!("Current thread {:?} does not match test_thread_id={:?}", thread::current().id(), self.test_thread_id);
-        }
-        &self.value
-    }
-}
-
-impl<T> Clone for FakeSendSync<T> {
-    fn clone(&self) -> Self {
-        let value = self.value.clone();
-        debug!("FakeSendSync::clone() with new strong_count={} on thread {:?}", Arc::strong_count(&self.value), thread::current().id());
-
-        Self {
-            test_thread_id: self.test_thread_id,
-            other_thread_id: self.other_thread_id,
-            value,
-        }
-    }
-}
-
-impl<T> Drop for FakeSendSync<T> {
-    fn drop(&mut self) {
-        debug!("FakeSendSync::drop() with new strong_count={} on thread {:?}", Arc::strong_count(&self.value) - 1, thread::current().id());
-    }
-}
+//#[allow(missing_debug_implementations)]
+//pub struct FakeSendSync<T> {
+//    test_thread_id: ThreadId,
+//    other_thread_id: Option<ThreadId>,
+//    value: Arc<T>,
+//}
+//
+//unsafe impl<T> Send for FakeSendSync<T> {}
+//unsafe impl<T> Sync for FakeSendSync<T> {}
+//
+//impl<T> FakeSendSync<T> {
+//    fn new(value: T) -> Self {
+//        let test_thread_id = thread::current().id();
+//        debug!("FakeSendSync::new() with strong_count=1 on thread {:?}", test_thread_id);
+//        Self {
+//            test_thread_id,
+//            other_thread_id: None,
+//            value: Arc::new(value),
+//        }
+//    }
+//}
+//
+//impl<T> Deref for FakeSendSync<T> {
+//    type Target = T;
+//
+//    #[track_caller]
+//    fn deref(&self) -> &Self::Target {
+//        // FIXME
+//        debug!("FakeSendSync::deref() with strong_count={} on thread {:?}", Arc::strong_count(&self.value), thread::current().id());
+//        // TODO: Switch back to assert_eq!
+//        if self.test_thread_id != thread::current().id() {
+//            error!("Current thread {:?} does not match test_thread_id={:?}", thread::current().id(), self.test_thread_id);
+//        }
+//        &self.value
+//    }
+//}
+//
+//impl<T> Clone for FakeSendSync<T> {
+//    fn clone(&self) -> Self {
+//        let value = self.value.clone();
+//        debug!("FakeSendSync::clone() with new strong_count={} on thread {:?}", Arc::strong_count(&self.value), thread::current().id());
+//
+//        Self {
+//            test_thread_id: self.test_thread_id,
+//            other_thread_id: self.other_thread_id,
+//            value,
+//        }
+//    }
+//}
+//
+//impl<T> Drop for FakeSendSync<T> {
+//    fn drop(&mut self) {
+//        debug!("FakeSendSync::drop() with new strong_count={} on thread {:?}", Arc::strong_count(&self.value) - 1, thread::current().id());
+//    }
+//}

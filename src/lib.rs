@@ -4,6 +4,8 @@
 //! implemented in the [category](category/index.html), [keyword](keyword/index.html),
 //! [krate](krate/index.html), [user](user/index.html) and [version](version/index.html) modules.
 
+#![feature(cell_leak)]
+
 #![warn(clippy::all, rust_2018_idioms)]
 #![warn(missing_debug_implementations, missing_copy_implementations)]
 
