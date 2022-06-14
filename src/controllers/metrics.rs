@@ -24,7 +24,7 @@ pub fn prometheus(req: &mut dyn RequestExt) -> EndpointResult {
     }
 
     let metrics = match req.params()["kind"].as_str() {
-        "service" => app.service_metrics.gather(&*req.db_read()?)?,
+        "service" => app.service_metrics.gather(&mut *req.db_read()?)?,
         "instance" => app.instance_metrics.gather(app)?,
         _ => return Err(not_found()),
     };

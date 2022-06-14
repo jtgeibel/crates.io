@@ -13,8 +13,7 @@ use crate::views::EncodableVersion;
 
 /// Handles the `GET /versions` route.
 pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
-    use diesel::dsl::any;
-    let conn = req.db_read()?;
+    let conn = &mut *req.db_read()?;
 
     // Extract all ids requested.
     let query = url::form_urlencoded::parse(req.query_string().unwrap_or("").as_bytes());
@@ -30,8 +29,8 @@ pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
             crates::name,
             users::all_columns.nullable(),
         ))
-        .filter(versions::id.eq(any(ids)))
-        .load(&*conn)?;
+        .filter(versions::id.eq_any(ids))
+        .load(conn)?;
     let versions = versions_and_publishers
         .iter()
         .map(|(v, _, _)| v)
@@ -39,7 +38,7 @@ pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
         .collect::<Vec<_>>();
     let versions = versions_and_publishers
         .into_iter()
-        .zip(VersionOwnerAction::for_versions(&conn, &versions)?.into_iter())
+        .zip(VersionOwnerAction::for_versions(conn, &versions)?.into_iter())
         .map(|((version, crate_name, published_by), actions)| {
             EncodableVersion::from(version, &crate_name, published_by, actions)
         })
@@ -54,7 +53,7 @@ pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
 pub fn show_by_id(req: &mut dyn RequestExt) -> EndpointResult {
     let id = &req.params()["version_id"];
     let id = id.parse().unwrap_or(0);
-    let conn = req.db_read()?;
+    let conn = &mut *req.db_read()?;
     let (version, krate, published_by): (Version, Crate, Option<User>) = versions::table
         .find(id)
         .inner_join(crates::table)
@@ -64,8 +63,8 @@ pub fn show_by_id(req: &mut dyn RequestExt) -> EndpointResult {
             crate::models::krate::ALL_COLUMNS,
             users::all_columns.nullable(),
         ))
-        .first(&*conn)?;
-    let audit_actions = VersionOwnerAction::by_version(&conn, &version)?;
+        .first(conn)?;
+    let audit_actions = VersionOwnerAction::by_version(conn, &version)?;
 
     let version = EncodableVersion::from(version, &krate.name, published_by, audit_actions);
     Ok(req.json(&json!({ "version": version })))

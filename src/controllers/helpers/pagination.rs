@@ -206,12 +206,12 @@ pub(crate) struct PaginatedQuery<T> {
 }
 
 impl<T> PaginatedQuery<T> {
-    pub(crate) fn load<U>(self, conn: &PgConnection) -> QueryResult<Paginated<U>>
+    pub(crate) fn load<'a, U>(self, conn: &mut PgConnection) -> QueryResult<Paginated<U>>
     where
-        Self: LoadQuery<PgConnection, WithCount<U>>,
+        Self: LoadQuery<'a, PgConnection, WithCount<U>>,
     {
         let options = self.options.clone();
-        let records_and_total = self.internal_load(conn)?;
+        let records_and_total = self.internal_load(conn)?.collect::<QueryResult<_>>()?;
         Ok(Paginated {
             records_and_total,
             options,
@@ -234,14 +234,14 @@ impl<T> QueryFragment<Pg> for PaginatedQuery<T>
 where
     T: QueryFragment<Pg>,
 {
-    fn walk_ast(&self, mut out: AstPass<'_, Pg>) -> QueryResult<()> {
+    fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("SELECT *, COUNT(*) OVER () FROM (");
         self.query.walk_ast(out.reborrow())?;
         out.push_sql(") t LIMIT ");
-        out.push_bind_param::<BigInt, _>(&i64::from(self.options.per_page))?;
+        out.push_bind_param::<BigInt, _>((self.options.per_page as &i64))?;
         if let Some(offset) = self.options.offset() {
             out.push_sql(" OFFSET ");
-            out.push_bind_param::<BigInt, _>(&i64::from(offset))?;
+            out.push_bind_param::<BigInt, _>(&(offset as i64))?;
         }
         Ok(())
     }

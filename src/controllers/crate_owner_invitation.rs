@@ -82,7 +82,7 @@ fn prepare_list(
         .gather(req)?;
 
     let user = auth.user();
-    let conn = req.db_read()?;
+    let conn = &mut *req.db_read()?;
     let config = &req.app().config;
 
     let mut crate_names = HashMap::new();
@@ -93,8 +93,8 @@ fn prepare_list(
         match filter {
             ListFilter::CrateName(crate_name) => {
                 // Only allow crate owners to query pending invitations for their crate.
-                let krate: Crate = Crate::by_name(&crate_name).first(&*conn)?;
-                let owners = krate.owners(&*conn)?;
+                let krate: Crate = Crate::by_name(&crate_name).first(conn)?;
+                let owners = krate.owners(conn)?;
                 if user.rights(req.app(), &owners)? != Rights::Full {
                     return Err(forbidden());
                 }
@@ -126,7 +126,7 @@ fn prepare_list(
 
     // Load and paginate the results.
     let mut raw_invitations: Vec<CrateOwnerInvitation> = match pagination.page {
-        Page::Unspecified => query.load(&*conn)?,
+        Page::Unspecified => query.load(conn)?,
         Page::Seek(s) => {
             let seek_key: (i32, i32) = s.decode()?;
             query
@@ -137,7 +137,7 @@ fn prepare_list(
                             .and(crate_owner_invitations::invited_user_id.gt(seek_key.1)),
                     ),
                 )
-                .load(&*conn)?
+                .load(conn)?
         }
         Page::Numeric(_) => unreachable!("page-based pagination is disabled"),
     };
@@ -173,7 +173,7 @@ fn prepare_list(
         let new_names: Vec<(i32, String)> = crates::table
             .select((crates::id, crates::name))
             .filter(crates::id.eq_any(missing_crate_names))
-            .load(&*conn)?;
+            .load(conn)?;
         for (id, name) in new_names.into_iter() {
             crate_names.insert(id, name);
         }
@@ -191,7 +191,7 @@ fn prepare_list(
     if !missing_users.is_empty() {
         let new_users: Vec<User> = users::table
             .filter(users::id.eq_any(missing_users))
-            .load(&*conn)?;
+            .load(conn)?;
         for user in new_users.into_iter() {
             users.insert(user.id, user);
         }
@@ -256,7 +256,7 @@ pub fn handle_invite(req: &mut dyn RequestExt) -> EndpointResult {
 
     let crate_invite = crate_invite.crate_owner_invite;
     let user_id = req.authenticate()?.user_id();
-    let conn = &*req.db_write()?;
+    let conn = &mut req.db_write()?;
     let config = &req.app().config;
 
     let invitation = CrateOwnerInvitation::find_by_id(user_id, crate_invite.crate_id, conn)?;
@@ -272,12 +272,12 @@ pub fn handle_invite(req: &mut dyn RequestExt) -> EndpointResult {
 /// Handles the `PUT /api/v1/me/crate_owner_invitations/accept/:token` route.
 pub fn handle_invite_with_token(req: &mut dyn RequestExt) -> EndpointResult {
     let config = &req.app().config;
-    let conn = req.db_write()?;
+    let conn = &mut req.db_write()?;
     let req_token = &req.params()["token"];
 
-    let invitation = CrateOwnerInvitation::find_by_token(req_token, &conn)?;
+    let invitation = CrateOwnerInvitation::find_by_token(req_token, conn)?;
     let crate_id = invitation.crate_id;
-    invitation.accept(&conn, config)?;
+    invitation.accept(conn, config)?;
 
     Ok(req.json(&json!({
         "crate_owner_invitation": {

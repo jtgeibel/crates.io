@@ -7,12 +7,12 @@ use diesel::prelude::*;
 use swirl::PerformError;
 
 #[swirl::background_job]
-pub fn update_downloads(conn: &PgConnection) -> Result<(), PerformError> {
+pub fn update_downloads(conn: &mut PgConnection) -> Result<(), PerformError> {
     update(conn)?;
     Ok(())
 }
 
-fn update(conn: &PgConnection) -> QueryResult<()> {
+fn update(conn: &mut PgConnection) -> QueryResult<()> {
     use self::version_downloads::dsl::*;
     use diesel::dsl::now;
     use diesel::select;
@@ -36,20 +36,20 @@ fn update(conn: &PgConnection) -> QueryResult<()> {
         .execute(conn)?;
     println!("Finished freezing old version_downloads");
 
-    no_arg_sql_function!(refresh_recent_crate_downloads, ());
-    select(refresh_recent_crate_downloads).execute(conn)?;
+    sql_function!(fn refresh_recent_crate_downloads());
+    select(refresh_recent_crate_downloads()).execute(conn)?;
     println!("Finished running refresh_recent_crate_downloads");
 
     Ok(())
 }
 
-fn collect(conn: &PgConnection, rows: &[VersionDownload]) -> QueryResult<()> {
+fn collect(conn: &mut PgConnection, rows: &[VersionDownload]) -> QueryResult<()> {
     use diesel::update;
 
     for download in rows {
         let amt = download.downloads - download.counted;
 
-        conn.transaction::<_, diesel::result::Error, _>(|| {
+        conn.transaction::<_, diesel::result::Error, _>(|conn| {
             // Update the total number of version downloads
             let crate_id: i32 = update(versions::table.find(download.version_id))
                 .set(versions::downloads.eq(versions::downloads + amt))
@@ -87,13 +87,13 @@ mod test {
     use crate::models::{Crate, NewCrate, NewUser, NewVersion, User, Version};
     use std::collections::HashMap;
 
-    fn user(conn: &PgConnection) -> User {
+    fn user(conn: &mut PgConnection) -> User {
         NewUser::new(2, "login", None, None, "access_token")
             .create_or_update(None, &Emails::new_in_memory(), conn)
             .unwrap()
     }
 
-    fn crate_and_version(conn: &PgConnection, user_id: i32) -> (Crate, Version) {
+    fn crate_and_version(conn: &mut PgConnection, user_id: i32) -> (Crate, Version) {
         let krate = NewCrate {
             name: "foo",
             ..Default::default()
@@ -118,12 +118,12 @@ mod test {
     fn increment() {
         use diesel::dsl::*;
 
-        let conn = crate::db::test_conn();
-        let user = user(&conn);
-        let (krate, version) = crate_and_version(&conn, user.id);
+        let conn = &mut crate::db::test_conn();
+        let user = user(conn);
+        let (krate, version) = crate_and_version(conn, user.id);
         insert_into(version_downloads::table)
             .values(version_downloads::version_id.eq(version.id))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
         insert_into(version_downloads::table)
             .values((
@@ -131,25 +131,25 @@ mod test {
                 version_downloads::date.eq(date(now - 1.day())),
                 version_downloads::processed.eq(true),
             ))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
 
-        super::update(&conn).unwrap();
+        super::update(conn).unwrap();
         let version_downloads = versions::table
             .find(version.id)
             .select(versions::downloads)
-            .first(&conn);
+            .first(conn);
         assert_eq!(Ok(1), version_downloads);
         let crate_downloads = crates::table
             .find(krate.id)
             .select(crates::downloads)
-            .first(&conn);
+            .first(conn);
         assert_eq!(Ok(1), crate_downloads);
-        super::update(&conn).unwrap();
+        super::update(conn).unwrap();
         let version_downloads = versions::table
             .find(version.id)
             .select(versions::downloads)
-            .first(&conn);
+            .first(conn);
         assert_eq!(Ok(1), version_downloads);
     }
 
@@ -157,9 +157,9 @@ mod test {
     fn set_processed_true() {
         use diesel::dsl::*;
 
-        let conn = crate::db::test_conn();
-        let user = user(&conn);
-        let (_, version) = crate_and_version(&conn, user.id);
+        let conn = &mut crate::db::test_conn();
+        let user = user(conn);
+        let (_, version) = crate_and_version(conn, user.id);
         insert_into(version_downloads::table)
             .values((
                 version_downloads::version_id.eq(version.id),
@@ -168,22 +168,22 @@ mod test {
                 version_downloads::date.eq(date(now - 2.days())),
                 version_downloads::processed.eq(false),
             ))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
-        super::update(&conn).unwrap();
+        super::update(conn).unwrap();
         let processed = version_downloads::table
             .filter(version_downloads::version_id.eq(version.id))
             .select(version_downloads::processed)
-            .first(&conn);
+            .first(conn);
         assert_eq!(Ok(true), processed);
     }
 
     #[test]
     fn dont_process_recent_row() {
         use diesel::dsl::*;
-        let conn = crate::db::test_conn();
-        let user = user(&conn);
-        let (_, version) = crate_and_version(&conn, user.id);
+        let conn = &mut crate::db::test_conn();
+        let user = user(conn);
+        let (_, version) = crate_and_version(conn, user.id);
         insert_into(version_downloads::table)
             .values((
                 version_downloads::version_id.eq(version.id),
@@ -192,13 +192,13 @@ mod test {
                 version_downloads::date.eq(date(now)),
                 version_downloads::processed.eq(false),
             ))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
-        super::update(&conn).unwrap();
+        super::update(conn).unwrap();
         let processed = version_downloads::table
             .filter(version_downloads::version_id.eq(version.id))
             .select(version_downloads::processed)
-            .first(&conn);
+            .first(conn);
         assert_eq!(Ok(false), processed);
     }
 
@@ -207,16 +207,16 @@ mod test {
         use diesel::dsl::*;
         use diesel::update;
 
-        let conn = crate::db::test_conn();
-        let user = user(&conn);
-        let (krate, version) = crate_and_version(&conn, user.id);
+        let conn = &mut crate::db::test_conn();
+        let user = user(conn);
+        let (krate, version) = crate_and_version(conn, user.id);
         update(versions::table)
             .set(versions::updated_at.eq(now - 2.hours()))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
         update(crates::table)
             .set(crates::updated_at.eq(now - 2.hours()))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
         insert_into(version_downloads::table)
             .values((
@@ -226,33 +226,33 @@ mod test {
                 version_downloads::date.eq(date(now)),
                 version_downloads::processed.eq(false),
             ))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
         insert_into(version_downloads::table)
             .values((
                 version_downloads::version_id.eq(version.id),
                 version_downloads::date.eq(date(now - 1.day())),
             ))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
 
-        let version_before: Version = versions::table.find(version.id).first(&conn).unwrap();
+        let version_before: Version = versions::table.find(version.id).first(conn).unwrap();
         let krate_before: Crate = Crate::all()
             .filter(crates::id.eq(krate.id))
-            .first(&conn)
+            .first(conn)
             .unwrap();
-        super::update(&conn).unwrap();
-        let version2: Version = versions::table.find(version.id).first(&conn).unwrap();
+        super::update(conn).unwrap();
+        let version2: Version = versions::table.find(version.id).first(conn).unwrap();
         assert_eq!(version2.downloads, 2);
         assert_eq!(version2.updated_at, version_before.updated_at);
         let krate2: Crate = Crate::all()
             .filter(crates::id.eq(krate.id))
-            .first(&conn)
+            .first(conn)
             .unwrap();
         assert_eq!(krate2.downloads, 2);
         assert_eq!(krate2.updated_at, krate_before.updated_at);
-        super::update(&conn).unwrap();
-        let version3: Version = versions::table.find(version.id).first(&conn).unwrap();
+        super::update(conn).unwrap();
+        let version3: Version = versions::table.find(version.id).first(conn).unwrap();
         assert_eq!(version3.downloads, 2);
     }
 
@@ -261,16 +261,16 @@ mod test {
         use diesel::dsl::*;
         use diesel::update;
 
-        let conn = crate::db::test_conn();
-        let user = user(&conn);
-        let (_, version) = crate_and_version(&conn, user.id);
+        let conn = &mut crate::db::test_conn();
+        let user = user(conn);
+        let (_, version) = crate_and_version(conn, user.id);
         update(versions::table)
             .set(versions::updated_at.eq(now - 2.days()))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
         update(crates::table)
             .set(crates::updated_at.eq(now - 2.days()))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
         insert_into(version_downloads::table)
             .values((
@@ -280,16 +280,16 @@ mod test {
                 version_downloads::date.eq(date(now - 2.days())),
                 version_downloads::processed.eq(false),
             ))
-            .execute(&conn)
+            .execute(conn)
             .unwrap();
 
-        super::update(&conn).unwrap();
+        super::update(conn).unwrap();
         let versions_changed = versions::table
             .select(versions::updated_at.ne(now - 2.days()))
-            .get_result(&conn);
+            .get_result(conn);
         let crates_changed = crates::table
             .select(crates::updated_at.ne(now - 2.days()))
-            .get_result(&conn);
+            .get_result(conn);
         assert_eq!(Ok(false), versions_changed);
         assert_eq!(Ok(false), crates_changed);
     }

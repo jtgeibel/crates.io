@@ -206,7 +206,7 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
             .map(|(_, value)| value.to_string())
             .collect();
 
-        query = query.filter(crates::name.eq(any(ids)));
+        query = query.filter(crates::name.eq_any(ids));
     }
 
     if !include_yanked {
@@ -248,7 +248,7 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
         .limit_page_numbers(req.app().clone())
         .enable_seek(supports_seek)
         .gather(req)?;
-    let conn = req.db_read()?;
+    let conn = &mut *req.db_read()?;
 
     let (explicit_page, seek) = match pagination.page.clone() {
         Page::Numeric(_) => (true, None),
@@ -267,7 +267,7 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
             let crate_name: String = crates::table
                 .find(seek)
                 .select(crates::name)
-                .get_result(&*conn)?;
+                .get_result(conn)?;
             query = query.filter(crates::name.gt(crate_name));
         }
 
@@ -277,9 +277,9 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
         //
         // If this becomes a problem in the future the crates count could be denormalized, at least
         // for the filterless happy path.
-        let total: i64 = crates::table.count().get_result(&*conn)?;
+        let total: i64 = crates::table.count().get_result(conn)?;
 
-        let results: Vec<(Crate, bool, Option<i64>)> = query.load(&*conn)?;
+        let results: Vec<(Crate, bool, Option<i64>)> = query.load(conn)?;
 
         let next_page = if let Some(last) = results.last() {
             let mut params = IndexMap::new();
@@ -295,7 +295,7 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
         (total, next_page, None, results, conn)
     } else {
         let query = query.pages_pagination(pagination);
-        let data: Paginated<(Crate, bool, Option<i64>)> = query.load(&*conn)?;
+        let data: Paginated<(Crate, bool, Option<i64>)> = query.load(conn)?;
         (
             data.total(),
             data.next_page_params().map(|p| req.query_with_params(p)),
@@ -312,7 +312,7 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
         .collect::<Vec<_>>();
     let crates = data.into_iter().map(|(c, _, _)| c).collect::<Vec<_>>();
 
-    let versions: Vec<Version> = crates.versions().load(&*conn)?;
+    let versions: Vec<Version> = crates.versions().load(conn)?;
     let versions = versions
         .grouped_by(&crates)
         .into_iter()
@@ -320,7 +320,7 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
 
     let badges: Vec<CrateBadge> = CrateBadge::belonging_to(&crates)
         .select((badges::crate_id, badges::all_columns))
-        .load(&*conn)?;
+        .load(conn)?;
     let badges = badges
         .grouped_by(&crates)
         .into_iter()
@@ -354,4 +354,4 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
     })))
 }
 
-diesel_infix_operator!(Contains, "@>");
+diesel::infix_operator!(Contains, "@>");

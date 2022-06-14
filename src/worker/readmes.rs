@@ -8,7 +8,7 @@ use crate::models::Version;
 
 #[swirl::background_job]
 pub fn render_and_upload_readme(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     env: &Environment,
     version_id: i32,
     text: String,
@@ -26,13 +26,13 @@ pub fn render_and_upload_readme(
         pkg_path_in_vcs.as_deref(),
     );
 
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         Version::record_readme_rendering(version_id, conn)?;
         let (crate_name, vers): (String, String) = versions::table
             .find(version_id)
             .inner_join(crates::table)
             .select((crates::name, versions::num))
-            .first(&*conn)?;
+            .first(conn)?;
         env.uploader
             .upload_readme(env.http_client(), &crate_name, &vers, rendered)?;
         Ok(())

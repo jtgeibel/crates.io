@@ -18,14 +18,14 @@ fn main() -> Result<()> {
             let count: i64 = background_jobs
                 .filter(job_type.eq("update_downloads"))
                 .count()
-                .get_result(&conn)
+                .get_result(conn)
                 .unwrap();
 
             if count > 0 {
                 println!("Did not enqueue update_downloads, existing job already in progress");
                 Ok(())
             } else {
-                Ok(worker::update_downloads().enqueue(&conn)?)
+                Ok(worker::update_downloads().enqueue(conn)?)
             }
         }
         "dump_db" => {
@@ -33,10 +33,10 @@ fn main() -> Result<()> {
             let target_name = args
                 .next()
                 .unwrap_or_else(|| String::from("db-dump.tar.gz"));
-            Ok(worker::dump_db(database_url, target_name).enqueue(&conn)?)
+            Ok(worker::dump_db(database_url, target_name).enqueue(conn)?)
         }
-        "daily_db_maintenance" => Ok(worker::daily_db_maintenance().enqueue(&conn)?),
-        "squash_index" => Ok(worker::squash_index().enqueue(&conn)?),
+        "daily_db_maintenance" => Ok(worker::daily_db_maintenance().enqueue(conn)?),
+        "squash_index" => Ok(worker::squash_index().enqueue(conn)?),
         other => Err(anyhow!("Unrecognized job type `{}`", other)),
     }
 }

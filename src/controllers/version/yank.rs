@@ -34,11 +34,11 @@ fn modify_yank(req: &mut dyn RequestExt, yanked: bool) -> EndpointResult {
     let authenticated_user = req.authenticate()?;
     let (crate_name, semver) = extract_crate_name_and_semver(req)?;
 
-    let conn = req.db_write()?;
-    let (version, krate) = version_and_crate(&conn, crate_name, semver)?;
+    let conn = &mut *req.db_write()?;
+    let (version, krate) = version_and_crate(conn, crate_name, semver)?;
     let api_token_id = authenticated_user.api_token_id();
     let user = authenticated_user.user();
-    let owners = krate.owners(&conn)?;
+    let owners = krate.owners(conn)?;
 
     if user.rights(req.app(), &owners)? < Rights::Publish {
         return Err(cargo_err("must already be an owner to yank or unyank"));
@@ -51,7 +51,7 @@ fn modify_yank(req: &mut dyn RequestExt, yanked: bool) -> EndpointResult {
 
     diesel::update(&version)
         .set(versions::yanked.eq(yanked))
-        .execute(&*conn)?;
+        .execute(conn)?;
 
     let action = if yanked {
         VersionAction::Yank
@@ -59,9 +59,9 @@ fn modify_yank(req: &mut dyn RequestExt, yanked: bool) -> EndpointResult {
         VersionAction::Unyank
     };
 
-    insert_version_owner_action(&conn, version.id, user.id, api_token_id, action)?;
+    insert_version_owner_action(conn, version.id, user.id, api_token_id, action)?;
 
-    worker::sync_yanked(krate.name, version.num).enqueue(&conn)?;
+    worker::sync_yanked(krate.name, version.num).enqueue(conn)?;
 
     ok_true()
 }

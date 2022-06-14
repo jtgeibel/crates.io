@@ -63,12 +63,12 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
     add_custom_metadata("crate_name", new_crate.name.to_string());
     add_custom_metadata("crate_version", new_crate.vers.to_string());
 
-    let conn = app.primary_database.get()?;
+    let conn = &mut *app.primary_database.get()?;
     let ids = req.authenticate()?;
     let api_token_id = ids.api_token_id();
     let user = ids.user();
 
-    let verified_email_address = user.verified_email(&conn)?;
+    let verified_email_address = user.verified_email(conn)?;
     let verified_email_address = verified_email_address.ok_or_else(|| {
         cargo_err(&format!(
             "A verified email address is required to publish crates to crates.io. \
@@ -79,7 +79,7 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
 
     // Create a transaction on the database, if there are no errors,
     // commit the transactions to record a new or updated crate.
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let _ = &new_crate;
         let name = new_crate.name;
         let vers = &*new_crate.vers;
@@ -114,9 +114,9 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
 
         let license_file = new_crate.license_file.as_deref();
         let krate =
-            persist.create_or_update(&conn, user.id, Some(&app.config.publish_rate_limit))?;
+            persist.create_or_update(conn, user.id, Some(&app.config.publish_rate_limit))?;
 
-        let owners = krate.owners(&conn)?;
+        let owners = krate.owners(conn)?;
         if user.rights(req.app(), &owners)? < Rights::Publish {
             return Err(cargo_err(MISSING_RIGHTS_ERROR_MESSAGE));
         }
@@ -166,10 +166,10 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
             file_length as i32,
             user.id,
         )?
-        .save(&conn, &verified_email_address)?;
+        .save(conn, &verified_email_address)?;
 
         insert_version_owner_action(
-            &conn,
+            conn,
             version.id,
             user.id,
             api_token_id,
@@ -177,19 +177,19 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
         )?;
 
         // Link this new version to all dependencies
-        let git_deps = add_dependencies(&conn, &new_crate.deps, version.id)?;
+        let git_deps = add_dependencies(conn, &new_crate.deps, version.id)?;
 
         // Update all keywords for this crate
-        Keyword::update_crate(&conn, &krate, &keywords)?;
+        Keyword::update_crate(conn, &krate, &keywords)?;
 
         // Update all categories for this crate, collecting any invalid categories
         // in order to be able to warn about them
-        let ignored_invalid_categories = Category::update_crate(&conn, &krate, &categories)?;
+        let ignored_invalid_categories = Category::update_crate(conn, &krate, &categories)?;
 
         // Update all badges for this crate, collecting any invalid badges in
         // order to be able to warn about them
-        let ignored_invalid_badges = Badge::update_crate(&conn, &krate, new_crate.badges.as_ref())?;
-        let top_versions = krate.top_versions(&conn)?;
+        let ignored_invalid_badges = Badge::update_crate(conn, &krate, new_crate.badges.as_ref())?;
+        let top_versions = krate.top_versions(conn)?;
 
         // Read tarball from request
         let mut tarball = Vec::new();
@@ -209,7 +209,7 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
                 repo,
                 pkg_path_in_vcs,
             )
-            .enqueue(&conn)?;
+            .enqueue(conn)?;
         }
 
         // Upload crate tarball
@@ -241,7 +241,7 @@ pub fn publish(req: &mut dyn RequestExt) -> EndpointResult {
             links,
             v,
         };
-        worker::add_crate(git_crate).enqueue(&conn)?;
+        worker::add_crate(git_crate).enqueue(conn)?;
 
         // The `other` field on `PublishWarnings` was introduced to handle a temporary warning
         // that is no longer needed. As such, crates.io currently does not return any `other`
@@ -310,7 +310,7 @@ pub fn missing_metadata_error_message(missing: &[&str]) -> String {
 }
 
 pub fn add_dependencies(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     deps: &[EncodableCrateDependency],
     target_version_id: i32,
 ) -> AppResult<Vec<cargo_registry_index::Dependency>> {
@@ -328,7 +328,7 @@ pub fn add_dependencies(
 
             // Match only identical names to ensure the index always references the original crate name
             let krate:Crate = Crate::by_exact_name(&dep.name)
-                .first(&*conn)
+                .first(conn)
                 .map_err(|_| cargo_err(&format_args!("no known crate named `{}`", &*dep.name)))?;
 
             if let Ok(version_req) = semver::VersionReq::parse(&dep.version_req.0) {

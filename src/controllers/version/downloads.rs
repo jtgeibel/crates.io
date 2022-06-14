@@ -45,7 +45,7 @@ pub fn download(req: &mut dyn RequestExt) -> EndpointResult {
             }
         };
 
-        if let Some(conn) = &conn {
+        if let Some(mut conn) = conn {
             use self::versions::dsl::*;
 
             // Returns the crate name as stored in the database, or an error if we could
@@ -59,7 +59,7 @@ pub fn download(req: &mut dyn RequestExt) -> EndpointResult {
                         .select((id, crates::name))
                         .filter(Crate::with_name(&crate_name))
                         .filter(num.eq(version))
-                        .first::<(i32, String)>(&**conn)
+                        .first::<(i32, String)>(&mut *conn)
                 })?;
 
             if canonical_crate_name != crate_name {
@@ -123,8 +123,8 @@ pub fn download(req: &mut dyn RequestExt) -> EndpointResult {
 pub fn downloads(req: &mut dyn RequestExt) -> EndpointResult {
     let (crate_name, semver) = extract_crate_name_and_semver(req)?;
 
-    let conn = req.db_read()?;
-    let (version, _) = version_and_crate(&conn, crate_name, semver)?;
+    let conn = &mut *req.db_read()?;
+    let (version, _) = version_and_crate(conn, crate_name, semver)?;
 
     let cutoff_end_date = req
         .query()
@@ -136,7 +136,7 @@ pub fn downloads(req: &mut dyn RequestExt) -> EndpointResult {
     let downloads = VersionDownload::belonging_to(&version)
         .filter(version_downloads::date.between(cutoff_start_date, cutoff_end_date))
         .order(version_downloads::date)
-        .load(&*conn)?
+        .load(conn)?
         .into_iter()
         .map(VersionDownload::into)
         .collect::<Vec<EncodableVersionDownload>>();

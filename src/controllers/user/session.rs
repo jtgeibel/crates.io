@@ -99,7 +99,7 @@ pub fn authorize(req: &mut dyn RequestExt) -> EndpointResult {
         &ghuser,
         token.secret(),
         &req.app().emails,
-        &*req.db_write()?,
+        &mut *req.db_write()?,
     )?;
 
     // Log in by setting a cookie and the middleware authentication
@@ -113,7 +113,7 @@ fn save_user_to_database(
     user: &GithubUser,
     access_token: &str,
     emails: &Emails,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> AppResult<User> {
     NewUser::new(
         user.id,
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn gh_user_with_invalid_email_doesnt_fail() {
         let emails = Emails::new_in_memory();
-        let conn = pg_connection();
+        let conn = &mut pg_connection();
         let gh_user = GithubUser {
             email: Some("String.Format(\"{0}.{1}@live.com\", FirstName, LastName)".into()),
             name: Some("My Name".into()),
@@ -166,7 +166,7 @@ mod tests {
             id: -1,
             avatar_url: None,
         };
-        let result = save_user_to_database(&gh_user, "arbitrary_token", &emails, &conn);
+        let result = save_user_to_database(&gh_user, "arbitrary_token", &emails, conn);
 
         assert!(
             result.is_ok(),

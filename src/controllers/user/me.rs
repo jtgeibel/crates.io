@@ -14,7 +14,7 @@ use crate::views::{EncodableMe, EncodablePrivateUser, EncodableVersion, OwnedCra
 /// Handles the `GET /me` route.
 pub fn me(req: &mut dyn RequestExt) -> EndpointResult {
     let user_id = req.authenticate()?.forbid_api_token_auth()?.user_id();
-    let conn = req.db_read_prefer_primary()?;
+    let conn = &mut *req.db_read_prefer_primary()?;
 
     let (user, verified, email, verification_sent): (User, Option<bool>, Option<String>, bool) =
         users::table
@@ -26,14 +26,14 @@ pub fn me(req: &mut dyn RequestExt) -> EndpointResult {
                 emails::email.nullable(),
                 emails::token_generated_at.nullable().is_not_null(),
             ))
-            .first(&*conn)?;
+            .first(conn)?;
 
     let owned_crates = CrateOwner::by_owner_kind(OwnerKind::User)
         .inner_join(crates::table)
         .filter(crate_owners::owner_id.eq(user_id))
         .select((crates::id, crates::name, crate_owners::email_notifications))
         .order(crates::name.asc())
-        .load(&*conn)?
+        .load(conn)?
         .into_iter()
         .map(|(id, name, email_notifications)| OwnedCrate {
             id,
@@ -52,8 +52,6 @@ pub fn me(req: &mut dyn RequestExt) -> EndpointResult {
 
 /// Handles the `GET /me/updates` route.
 pub fn updates(req: &mut dyn RequestExt) -> EndpointResult {
-    use diesel::dsl::any;
-
     let authenticated_user = req.authenticate()?.forbid_api_token_auth()?;
     let user = authenticated_user.user();
 
@@ -61,7 +59,7 @@ pub fn updates(req: &mut dyn RequestExt) -> EndpointResult {
     let query = versions::table
         .inner_join(crates::table)
         .left_outer_join(users::table)
-        .filter(crates::id.eq(any(followed_crates)))
+        .filter(crates::id.eq_any(followed_crates))
         .order(versions::created_at.desc())
         .select((
             versions::all_columns,
@@ -69,13 +67,13 @@ pub fn updates(req: &mut dyn RequestExt) -> EndpointResult {
             users::all_columns.nullable(),
         ))
         .pages_pagination(PaginationOptions::builder().gather(req)?);
-    let conn = req.db_read_prefer_primary()?;
-    let data: Paginated<(Version, String, Option<User>)> = query.load(&*conn)?;
+    let conn = &mut req.db_read_prefer_primary()?;
+    let data: Paginated<(Version, String, Option<User>)> = query.load(conn)?;
     let more = data.next_page_params().is_some();
     let versions = data.iter().map(|(v, _, _)| v).cloned().collect::<Vec<_>>();
     let data = data
         .into_iter()
-        .zip(VersionOwnerAction::for_versions(&conn, &versions)?.into_iter())
+        .zip(VersionOwnerAction::for_versions(conn, &versions)?.into_iter())
         .map(|((v, cn, pb), voas)| (v, cn, pb, voas));
 
     let versions = data
@@ -102,7 +100,7 @@ pub fn update_user(req: &mut dyn RequestExt) -> EndpointResult {
     req.body().read_to_string(&mut body)?;
 
     let param_user_id = &req.params()["user_id"];
-    let conn = req.db_write()?;
+    let conn = &mut req.db_write()?;
     let user = authenticated_user.user();
 
     // need to check if current user matches user to be updated
@@ -132,7 +130,7 @@ pub fn update_user(req: &mut dyn RequestExt) -> EndpointResult {
         return Err(bad_request("empty email rejected"));
     }
 
-    conn.transaction::<_, Box<dyn AppError>, _>(|| {
+    conn.transaction::<_, Box<dyn AppError>, _>(|conn| {
         let new_email = NewEmail {
             user_id: user.id,
             email: user_email,
@@ -144,7 +142,7 @@ pub fn update_user(req: &mut dyn RequestExt) -> EndpointResult {
             .do_update()
             .set(&new_email)
             .returning(emails::token)
-            .get_result(&*conn)
+            .get_result(conn)
             .map_err(|_| server_error("Error in creating token"))?;
 
         // This swallows any errors that occur while attempting to send the email. Some users have
@@ -166,12 +164,12 @@ pub fn update_user(req: &mut dyn RequestExt) -> EndpointResult {
 pub fn confirm_user_email(req: &mut dyn RequestExt) -> EndpointResult {
     use diesel::update;
 
-    let conn = req.db_write()?;
+    let conn = &mut *req.db_write()?;
     let req_token = &req.params()["email_token"];
 
     let updated_rows = update(emails::table.filter(emails::token.eq(req_token)))
         .set(emails::verified.eq(true))
-        .execute(&*conn)?;
+        .execute(conn)?;
 
     if updated_rows == 0 {
         return Err(bad_request("Email belonging to token not found."));
@@ -189,7 +187,7 @@ pub fn regenerate_token_and_send(req: &mut dyn RequestExt) -> EndpointResult {
         .parse::<i32>()
         .map_err(|err| err.chain(bad_request("invalid user_id")))?;
     let authenticated_user = req.authenticate()?;
-    let conn = req.db_write()?;
+    let conn = &mut req.db_write()?;
     let user = authenticated_user.user();
 
     // need to check if current user matches user to be updated
@@ -197,10 +195,10 @@ pub fn regenerate_token_and_send(req: &mut dyn RequestExt) -> EndpointResult {
         return Err(bad_request("current user does not match requested user"));
     }
 
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let email: Email = update(Email::belonging_to(&user))
             .set(emails::token.eq(sql("DEFAULT")))
-            .get_result(&*conn)
+            .get_result(conn)
             .map_err(|_| bad_request("Email could not be found"))?;
 
         req.app()
@@ -231,13 +229,13 @@ pub fn update_email_notifications(req: &mut dyn RequestExt) -> EndpointResult {
         .collect();
 
     let user_id = req.authenticate()?.user_id();
-    let conn = req.db_write()?;
+    let conn = &mut *req.db_write()?;
 
     // Build inserts from existing crates belonging to the current user
     let to_insert = CrateOwner::by_owner_kind(OwnerKind::User)
         .filter(owner_id.eq(user_id))
         .select((crate_id, owner_id, owner_kind, email_notifications))
-        .load(&*conn)?
+        .load(conn)?
         .into_iter()
         // Remove records whose `email_notifications` will not change from their current value
         .map(
@@ -259,7 +257,7 @@ pub fn update_email_notifications(req: &mut dyn RequestExt) -> EndpointResult {
         .on_conflict((crate_id, owner_id, owner_kind))
         .do_update()
         .set(email_notifications.eq(excluded(email_notifications)))
-        .execute(&*conn)?;
+        .execute(conn)?;
 
     ok_true()
 }

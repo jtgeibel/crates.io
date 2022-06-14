@@ -20,9 +20,9 @@ use super::{extract_crate_name_and_semver, version_and_crate};
 /// be 0)
 pub fn dependencies(req: &mut dyn RequestExt) -> EndpointResult {
     let (crate_name, semver) = extract_crate_name_and_semver(req)?;
-    let conn = req.db_read()?;
-    let (version, _) = version_and_crate(&conn, crate_name, semver)?;
-    let deps = version.dependencies(&conn)?;
+    let conn = &mut req.db_read()?;
+    let (version, _) = version_and_crate(conn, crate_name, semver)?;
+    let deps = version.dependencies(conn)?;
     let deps = deps
         .into_iter()
         .map(|(dep, crate_name)| EncodableDependency::from_dep(dep, &crate_name))
@@ -48,10 +48,10 @@ pub fn authors(req: &mut dyn RequestExt) -> EndpointResult {
 /// API route to have.
 pub fn show(req: &mut dyn RequestExt) -> EndpointResult {
     let (crate_name, semver) = extract_crate_name_and_semver(req)?;
-    let conn = req.db_read()?;
-    let (version, krate) = version_and_crate(&conn, crate_name, semver)?;
-    let published_by = version.published_by(&conn);
-    let actions = VersionOwnerAction::by_version(&conn, &version)?;
+    let conn = &mut req.db_read()?;
+    let (version, krate) = version_and_crate(conn, crate_name, semver)?;
+    let published_by = version.published_by(conn);
+    let actions = VersionOwnerAction::by_version(conn, &version)?;
 
     let version = EncodableVersion::from(version, &krate.name, published_by, actions);
     Ok(req.json(&json!({ "version": version })))

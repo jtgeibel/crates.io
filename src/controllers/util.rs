@@ -65,13 +65,13 @@ fn verify_origin(req: &dyn RequestExt) -> AppResult<()> {
 }
 
 fn authenticate_user(req: &dyn RequestExt) -> AppResult<AuthenticatedUser> {
-    let conn = req.db_write()?;
+    let conn = &mut req.db_write()?;
 
     let session = req.session();
     let user_id_from_session = session.get("user_id").and_then(|s| s.parse::<i32>().ok());
 
     if let Some(id) = user_id_from_session {
-        let user = User::find(&conn, id)
+        let user = User::find(conn, id)
             .map_err(|err| err.chain(internal("user_id from cookie not found in database")))?;
 
         return Ok(AuthenticatedUser {
@@ -87,7 +87,7 @@ fn authenticate_user(req: &dyn RequestExt) -> AppResult<AuthenticatedUser> {
         .and_then(|h| h.to_str().ok());
 
     if let Some(header_value) = maybe_authorization {
-        let token = ApiToken::find_by_api_token(&conn, header_value).map_err(|e| {
+        let token = ApiToken::find_by_api_token(conn, header_value).map_err(|e| {
             if e.is::<InsecurelyGeneratedTokenRevoked>() {
                 e
             } else {
@@ -95,7 +95,7 @@ fn authenticate_user(req: &dyn RequestExt) -> AppResult<AuthenticatedUser> {
             }
         })?;
 
-        let user = User::find(&conn, token.user_id)
+        let user = User::find(conn, token.user_id)
             .map_err(|err| err.chain(internal("user_id from token not found in database")))?;
 
         return Ok(AuthenticatedUser {

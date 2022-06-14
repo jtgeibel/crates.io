@@ -11,13 +11,13 @@ use serde_json as json;
 /// Handles the `GET /me/tokens` route.
 pub fn list(req: &mut dyn RequestExt) -> EndpointResult {
     let authenticated_user = req.authenticate()?.forbid_api_token_auth()?;
-    let conn = req.db_read_prefer_primary()?;
+    let conn = &mut *req.db_read_prefer_primary()?;
     let user = authenticated_user.user();
 
     let tokens: Vec<ApiToken> = ApiToken::belonging_to(&user)
         .filter(api_tokens::revoked.eq(false))
         .order(api_tokens::created_at.desc())
-        .load(&*conn)?;
+        .load(conn)?;
 
     Ok(req.json(&json!({ "api_tokens": tokens })))
 }
@@ -66,11 +66,11 @@ pub fn new(req: &mut dyn RequestExt) -> EndpointResult {
         ));
     }
 
-    let conn = req.db_write()?;
+    let conn = &mut *req.db_write()?;
     let user = authenticated_user.user();
 
     let max_token_per_user = 500;
-    let count: i64 = ApiToken::belonging_to(&user).count().get_result(&*conn)?;
+    let count: i64 = ApiToken::belonging_to(&user).count().get_result(conn)?;
     if count >= max_token_per_user {
         return Err(bad_request(&format!(
             "maximum tokens per user is: {}",
@@ -78,7 +78,7 @@ pub fn new(req: &mut dyn RequestExt) -> EndpointResult {
         )));
     }
 
-    let api_token = ApiToken::insert(&*conn, user.id, name)?;
+    let api_token = ApiToken::insert(conn, user.id, name)?;
     let api_token = EncodableApiTokenWithToken::from(api_token);
 
     Ok(req.json(&json!({ "api_token": api_token })))
@@ -91,11 +91,11 @@ pub fn revoke(req: &mut dyn RequestExt) -> EndpointResult {
         .map_err(|e| bad_request(&format!("invalid token id: {e:?}")))?;
 
     let authenticated_user = req.authenticate()?;
-    let conn = req.db_write()?;
+    let conn = &mut *req.db_write()?;
     let user = authenticated_user.user();
     diesel::update(ApiToken::belonging_to(&user).find(id))
         .set(api_tokens::revoked.eq(true))
-        .execute(&*conn)?;
+        .execute(conn)?;
 
     Ok(req.json(&json!({})))
 }
@@ -107,10 +107,10 @@ pub fn revoke_current(req: &mut dyn RequestExt) -> EndpointResult {
         .api_token_id()
         .ok_or_else(|| bad_request("token not provided"))?;
 
-    let conn = req.db_write()?;
+    let conn = &mut *req.db_write()?;
     diesel::update(api_tokens::table.filter(api_tokens::id.eq(api_token_id)))
         .set(api_tokens::revoked.eq(true))
-        .execute(&*conn)?;
+        .execute(conn)?;
 
     Ok(Response::builder().status(204).body(Body::empty()).unwrap())
 }

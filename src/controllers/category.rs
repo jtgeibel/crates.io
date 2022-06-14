@@ -15,16 +15,16 @@ pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
     let offset = options.offset().unwrap_or_default();
     let sort = query.get("sort").map_or("alpha", String::as_str);
 
-    let conn = req.db_read()?;
+    let conn = &mut req.db_read()?;
     let categories =
-        Category::toplevel(&conn, sort, i64::from(options.per_page), i64::from(offset))?;
+        Category::toplevel(conn, sort, i64::from(options.per_page), i64::from(offset))?;
     let categories = categories
         .into_iter()
         .map(Category::into)
         .collect::<Vec<EncodableCategory>>();
 
     // Query for the total count of categories
-    let total = Category::count_toplevel(&conn)?;
+    let total = Category::count_toplevel(conn)?;
 
     Ok(req.json(&json!({
         "categories": categories,
@@ -35,15 +35,15 @@ pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
 /// Handles the `GET /categories/:category_id` route.
 pub fn show(req: &mut dyn RequestExt) -> EndpointResult {
     let slug = &req.params()["category_id"];
-    let conn = req.db_read()?;
-    let cat: Category = Category::by_slug(slug).first(&*conn)?;
+    let conn = &mut *req.db_read()?;
+    let cat: Category = Category::by_slug(slug).first(conn)?;
     let subcats = cat
-        .subcategories(&conn)?
+        .subcategories(conn)?
         .into_iter()
         .map(Category::into)
         .collect();
     let parents = cat
-        .parent_categories(&conn)?
+        .parent_categories(conn)?
         .into_iter()
         .map(Category::into)
         .collect();
@@ -65,11 +65,11 @@ pub fn show(req: &mut dyn RequestExt) -> EndpointResult {
 
 /// Handles the `GET /category_slugs` route.
 pub fn slugs(req: &mut dyn RequestExt) -> EndpointResult {
-    let conn = req.db_read()?;
+    let conn = &mut *req.db_read()?;
     let slugs: Vec<Slug> = categories::table
         .select((categories::slug, categories::slug, categories::description))
         .order(categories::slug)
-        .load(&*conn)?;
+        .load(conn)?;
 
     #[derive(Serialize, Queryable)]
     struct Slug {

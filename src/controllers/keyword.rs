@@ -21,8 +21,8 @@ pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
     }
 
     let query = query.pages_pagination(PaginationOptions::builder().gather(req)?);
-    let conn = req.db_read()?;
-    let data: Paginated<Keyword> = query.load(&*conn)?;
+    let conn = &mut req.db_read()?;
+    let data: Paginated<Keyword> = query.load(conn)?;
     let total = data.total();
     let kws = data
         .into_iter()
@@ -38,9 +38,9 @@ pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
 /// Handles the `GET /keywords/:keyword_id` route.
 pub fn show(req: &mut dyn RequestExt) -> EndpointResult {
     let name = &req.params()["keyword_id"];
-    let conn = req.db_read()?;
+    let conn = &mut req.db_read()?;
 
-    let kw = Keyword::find_by_keyword(&conn, name)?;
+    let kw = Keyword::find_by_keyword(conn, name)?;
 
     Ok(req.json(&json!({ "keyword": EncodableKeyword::from(kw) })))
 }

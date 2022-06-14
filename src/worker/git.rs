@@ -9,7 +9,11 @@ use std::process::Command;
 use swirl::PerformError;
 
 #[swirl::background_job]
-pub fn add_crate(env: &Environment, conn: &PgConnection, krate: Crate) -> Result<(), PerformError> {
+pub fn add_crate(
+    env: &Environment,
+    conn: &mut PgConnection,
+    krate: Crate,
+) -> Result<(), PerformError> {
     use std::io::prelude::*;
 
     let repo = env.lock_index()?;
@@ -46,7 +50,7 @@ pub fn update_crate_index(env: &Environment, crate_name: String) -> Result<(), P
 #[swirl::background_job]
 pub fn sync_yanked(
     env: &Environment,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     krate: String,
     version_num: String,
 ) -> Result<(), PerformError> {

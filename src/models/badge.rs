@@ -12,8 +12,8 @@ use crate::schema::badges;
 /// However, when we are eager loading all badges for a group of crates, we need
 /// the crate ID to group badges by their owner.
 #[derive(Debug, Queryable, Associations)]
-#[belongs_to(Crate)]
-#[table_name = "badges"]
+#[diesel(belongs_to(Crate))]
+#[diesel(table_name = badges)]
 pub struct CrateBadge {
     pub crate_id: i32,
     pub badge: Badge,
@@ -100,15 +100,16 @@ impl HasTable for CrateBadge {
 impl Queryable<badges::SqlType, Pg> for Badge {
     type Row = (i32, String, serde_json::Value);
 
-    fn build((_, badge_type, attributes): Self::Row) -> Self {
+    fn build((_, badge_type, attributes): Self::Row) -> diesel::deserialize::Result<Self> {
         let json = json!({"badge_type": badge_type, "attributes": attributes});
-        serde_json::from_value(json).expect("Invalid CI badge in the database")
+        // FIXME: Switch from panic to Err(_)
+        Ok(serde_json::from_value(json).expect("Invalid CI badge in the database"))
     }
 }
 
 impl Badge {
     pub fn update_crate(
-        conn: &PgConnection,
+        conn: &mut PgConnection,
         krate: &Crate,
         badges: Option<&HashMap<String, HashMap<String, String>>>,
     ) -> QueryResult<Vec<String>> {
@@ -134,7 +135,7 @@ impl Badge {
             }
         }
 
-        conn.transaction(|| {
+        conn.transaction(|conn| {
             delete(badges::table)
                 .filter(badges::crate_id.eq(krate.id))
                 .execute(conn)?;

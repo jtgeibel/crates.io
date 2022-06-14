@@ -7,10 +7,10 @@ use crate::views::EncodableOwner;
 /// Handles the `GET /crates/:crate_id/owners` route.
 pub fn owners(req: &mut dyn RequestExt) -> EndpointResult {
     let crate_name = &req.params()["crate_id"];
-    let conn = req.db_read()?;
-    let krate: Crate = Crate::by_name(crate_name).first(&*conn)?;
+    let conn = &mut *req.db_read()?;
+    let krate: Crate = Crate::by_name(crate_name).first(conn)?;
     let owners = krate
-        .owners(&conn)?
+        .owners(conn)?
         .into_iter()
         .map(Owner::into)
         .collect::<Vec<EncodableOwner>>();
@@ -21,9 +21,9 @@ pub fn owners(req: &mut dyn RequestExt) -> EndpointResult {
 /// Handles the `GET /crates/:crate_id/owner_team` route.
 pub fn owner_team(req: &mut dyn RequestExt) -> EndpointResult {
     let crate_name = &req.params()["crate_id"];
-    let conn = req.db_read()?;
-    let krate: Crate = Crate::by_name(crate_name).first(&*conn)?;
-    let owners = Team::owning(&krate, &conn)?
+    let conn = &mut *req.db_read()?;
+    let krate: Crate = Crate::by_name(crate_name).first(conn)?;
+    let owners = Team::owning(&krate, conn)?
         .into_iter()
         .map(Owner::into)
         .collect::<Vec<EncodableOwner>>();
@@ -34,9 +34,9 @@ pub fn owner_team(req: &mut dyn RequestExt) -> EndpointResult {
 /// Handles the `GET /crates/:crate_id/owner_user` route.
 pub fn owner_user(req: &mut dyn RequestExt) -> EndpointResult {
     let crate_name = &req.params()["crate_id"];
-    let conn = req.db_read()?;
-    let krate: Crate = Crate::by_name(crate_name).first(&*conn)?;
-    let owners = User::owning(&krate, &conn)?
+    let conn = &mut *req.db_read()?;
+    let krate: Crate = Crate::by_name(crate_name).first(conn)?;
+    let owners = User::owning(&krate, conn)?
         .into_iter()
         .map(Owner::into)
         .collect::<Vec<EncodableOwner>>();
@@ -84,12 +84,12 @@ fn modify_owners(req: &mut dyn RequestExt, add: bool) -> EndpointResult {
     let app = req.app();
     let crate_name = &req.params()["crate_id"];
 
-    let conn = req.db_write()?;
+    let conn = &mut req.db_write()?;
     let user = authenticated_user.user();
 
-    conn.transaction(|| {
-        let krate: Crate = Crate::by_name(crate_name).first(&*conn)?;
-        let owners = krate.owners(&conn)?;
+    conn.transaction(|conn| {
+        let krate: Crate = Crate::by_name(crate_name).first(conn)?;
+        let owners = krate.owners(conn)?;
 
         match user.rights(app, &owners)? {
             Rights::Full => {}
@@ -112,15 +112,15 @@ fn modify_owners(req: &mut dyn RequestExt, add: bool) -> EndpointResult {
                 if owners.iter().any(login_test) {
                     return Err(cargo_err(&format_args!("`{}` is already an owner", login)));
                 }
-                let msg = krate.owner_add(app, &conn, &user, login)?;
+                let msg = krate.owner_add(app, conn, &user, login)?;
                 msgs.push(msg);
             }
             msgs.join(",")
         } else {
             for login in &logins {
-                krate.owner_remove(app, &conn, &user, login)?;
+                krate.owner_remove(app, conn, &user, login)?;
             }
-            if User::owning(&krate, &conn)?.is_empty() {
+            if User::owning(&krate, conn)?.is_empty() {
                 return Err(cargo_err(
                     "cannot remove all individual owners of a crate. \
                      Team member don't have permission to modify owners, so \

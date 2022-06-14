@@ -9,8 +9,8 @@ pub fn show_team(req: &mut dyn RequestExt) -> EndpointResult {
     use self::teams::dsl::{login, teams};
 
     let name = &req.params()["team_id"];
-    let conn = req.db_read()?;
-    let team: Team = teams.filter(login.eq(name)).first(&*conn)?;
+    let conn = &mut *req.db_read()?;
+    let team: Team = teams.filter(login.eq(name)).first(conn)?;
 
     Ok(req.json(&json!({ "team": EncodableTeam::from(team) })))
 }

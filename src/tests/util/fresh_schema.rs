@@ -24,7 +24,7 @@ impl FreshSchema {
         .expect("failed to initialize schema");
 
         let migrations_dir = find_migrations_directory().unwrap();
-        run_pending_migrations_in_directory(&conn, &migrations_dir, &mut std::io::sink())
+        run_pending_migrations_in_directory(conn, &migrations_dir, &mut std::io::sink())
             .expect("failed to run migrations on the test schema");
 
         let database_url = url::Url::parse_with_params(

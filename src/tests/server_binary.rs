@@ -58,7 +58,7 @@ fn startup_without_database() -> Result<(), Error> {
     Ok(())
 }
 
-fn initialize_dummy_crate(conn: &PgConnection) {
+fn initialize_dummy_crate(conn: &mut PgConnection) {
     use cargo_registry::schema::users;
 
     let user: User = diesel::insert_into(users::table)
