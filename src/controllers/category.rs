@@ -16,8 +16,7 @@ pub fn index(req: &mut dyn RequestExt) -> EndpointResult {
     let sort = query.get("sort").map_or("alpha", String::as_str);
 
     let conn = &mut req.db_read()?;
-    let categories =
-        Category::toplevel(conn, sort, i64::from(options.per_page), i64::from(offset))?;
+    let categories = Category::toplevel(conn, sort, options.per_page, offset)?;
     let categories = categories
         .into_iter()
         .map(Category::into)

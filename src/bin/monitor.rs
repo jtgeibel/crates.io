@@ -11,7 +11,7 @@ use cargo_registry::{admin::on_call, db, schema::*};
 use diesel::prelude::*;
 
 fn main() -> Result<()> {
-    let conn = db::oneoff_connection()?;
+    let conn = &mut db::oneoff_connection()?;
 
     check_failing_background_jobs(conn)?;
     check_stalled_update_downloads(conn)?;
@@ -108,7 +108,6 @@ fn check_stalled_update_downloads(conn: &mut PgConnection) -> Result<()> {
 /// Check for known spam patterns
 fn check_spam_attack(conn: &mut PgConnection) -> Result<()> {
     use cargo_registry::sql::canon_crate_name;
-    use diesel::dsl::*;
 
     const EVENT_KEY: &str = "spam_attack";
 
@@ -123,7 +122,7 @@ fn check_spam_attack(conn: &mut PgConnection) -> Result<()> {
     let mut event_description = None;
 
     let bad_crate: Option<String> = crates::table
-        .filter(canon_crate_name(crates::name).eq(any(bad_crate_names)))
+        .filter(canon_crate_name(crates::name).eq_any(bad_crate_names))
         .select(crates::name)
         .first(conn)
         .optional()?;

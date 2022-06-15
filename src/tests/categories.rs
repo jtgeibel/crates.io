@@ -40,7 +40,7 @@ description = "Another category ho hum"
 fn pg_connection() -> PgConnection {
     let database_url =
         dotenv::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL must be set to run tests");
-    let conn = PgConnection::establish(&database_url).unwrap();
+    let mut conn = PgConnection::establish(&database_url).unwrap();
     conn.begin_test_transaction().unwrap();
     conn
 }

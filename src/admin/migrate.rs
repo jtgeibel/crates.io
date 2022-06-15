@@ -42,7 +42,9 @@ pub fn run(_opts: Opts) -> Result<(), Error> {
     // let migrations = ;
     let mut stdout = std::io::stdout();
     let mut harness = HarnessWithOutput::new(conn, &mut stdout);
-    harness.run_pending_migrations(MIGRATIONS);
+    harness
+        .run_pending_migrations(MIGRATIONS)
+        .expect("failed to run migrations");
 
     println!("==> synchronizing crate categories");
     crate::boot::categories::sync_with_connection(CATEGORIES_TOML, conn).unwrap();

@@ -434,8 +434,8 @@ impl Crate {
         let rows: Vec<WithCount<ReverseDependency>> =
             sql_query(include_str!("krate_reverse_dependencies.sql"))
                 .bind::<Integer, _>(self.id)
-                .bind::<BigInt, _>(i64::from(offset))
-                .bind::<BigInt, _>(i64::from(options.per_page))
+                .bind::<BigInt, _>(offset)
+                .bind::<BigInt, _>(options.per_page)
                 .load(conn)?;
 
         Ok(rows.records_and_total())

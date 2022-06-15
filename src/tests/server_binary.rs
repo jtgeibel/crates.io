@@ -16,7 +16,7 @@ const SERVER_BOOT_TIMEOUT_SECONDS: u64 = 30;
 #[test]
 fn normal_startup() -> Result<(), Error> {
     let server_bin = ServerBin::prepare()?;
-    initialize_dummy_crate(&server_bin.db()?);
+    initialize_dummy_crate(&mut server_bin.db()?);
 
     let running_server = server_bin.start()?;
 
@@ -36,7 +36,7 @@ fn normal_startup() -> Result<(), Error> {
 #[test]
 fn startup_without_database() -> Result<(), Error> {
     let server_bin = ServerBin::prepare()?;
-    initialize_dummy_crate(&server_bin.db()?);
+    initialize_dummy_crate(&mut server_bin.db()?);
 
     // Break the networking *before* starting the binary, to ensure the binary can fully startup
     // without a database connection. Most of crates.io should not work when started without a
