@@ -1,9 +1,8 @@
 use conduit::RequestExt;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager, CustomizeConnection};
-use parking_lot::{ReentrantMutex, ReentrantMutexGuard};
 use prometheus::Histogram;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::{
     ops::{Deref, DerefMut},
     time::Duration,
@@ -20,7 +19,7 @@ pub enum DieselPool {
         pool: r2d2::Pool<ConnectionManager<PgConnection>>,
         time_to_obtain_connection_metric: Histogram,
     },
-    Test(Arc<ReentrantMutex<PgConnection>>),
+    Test(Arc<Mutex<PgConnection>>),
 }
 
 impl DieselPool {
@@ -61,7 +60,7 @@ impl DieselPool {
             .expect("failed to establish connection");
         conn.begin_test_transaction()
             .expect("failed to begin test transaction");
-        DieselPool::Test(Arc::new(ReentrantMutex::new(conn)))
+        DieselPool::Test(Arc::new(Mutex::new(conn)))
     }
 
     pub fn get(&self) -> Result<DieselPooledConn<'_>, PoolError> {
@@ -78,7 +77,7 @@ impl DieselPool {
                     Ok(DieselPooledConn::Pool(pool.get()?))
                 }
             }),
-            DieselPool::Test(conn) => Ok(DieselPooledConn::Test(conn.lock())),
+            DieselPool::Test(conn) => Ok(DieselPooledConn::Test(conn.try_lock().unwrap())),
         }
     }
 
@@ -122,7 +121,7 @@ pub struct PoolState {
 
 pub enum DieselPooledConn<'a> {
     Pool(r2d2::PooledConnection<ConnectionManager<PgConnection>>),
-    Test(ReentrantMutexGuard<'a, PgConnection>),
+    Test(MutexGuard<'a, PgConnection>),
 }
 
 impl Deref for DieselPooledConn<'_> {
